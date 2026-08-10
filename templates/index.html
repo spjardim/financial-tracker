@@ -1,0 +1,276 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+    <div class="yearly-pnl">
+        <div class="yearly-pnl-header">
+            <div class="period-nav">
+                <button type="button" class="period-nav-btn" title="Previous year"
+                        onclick="window.location.href='{{ url_for('index', year=current_year - 1) }}'">&lsaquo;</button>
+                <h1>{{ current_year }} Overview</h1>
+                <button type="button" class="period-nav-btn" title="Next year" {% if not can_go_next_year %}disabled{% endif %}
+                        onclick="window.location.href='{{ url_for('index', year=current_year + 1) }}'">&rsaquo;</button>
+            </div>
+            <div class="chart-legend">
+                <span class="legend-item"><span class="legend-swatch swatch-income"></span>Income</span>
+                <span class="legend-item"><span class="legend-swatch swatch-expense"></span>Expenses</span>
+            </div>
+        </div>
+        <div class="chart-plot">
+            <div class="chart-gridlines">
+                {% for tick in axis_ticks %}
+                    <div class="gridline" style="bottom: {{ tick.bottom }}px;">
+                        <span class="gridline-label">${{ '{:,.0f}'.format(tick.value) }}</span>
+                    </div>
+                {% endfor %}
+            </div>
+            <div class="chart-bars">
+                {% for m in monthly_pnl %}
+                    <div class="month-group">
+                        <div class="bar-pair">
+                            <div class="bar bar-income" style="height: {{ m.income_height }}px;"
+                                 tabindex="0" data-tooltip="{{ m.name }} Income: ${{ '{:,.2f}'.format(m.income) }}"></div>
+                            <div class="bar bar-expense" style="height: {{ m.expense_height }}px;"
+                                 tabindex="0" data-tooltip="{{ m.name }} Expenses: ${{ '{:,.2f}'.format(m.expenses) }}"></div>
+                        </div>
+                        <span class="month-label">{{ m.name }}</span>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+        <details class="chart-table-toggle">
+            <summary>View as table</summary>
+            <table class="chart-table">
+                <thead>
+                    <tr><th>Month</th><th>Income</th><th>Expenses</th><th>Net</th></tr>
+                </thead>
+                <tbody>
+                    {% for m in monthly_pnl %}
+                        <tr>
+                            <td>{{ m.name }}</td>
+                            <td>${{ '{:,.2f}'.format(m.income) }}</td>
+                            <td>${{ '{:,.2f}'.format(m.expenses) }}</td>
+                            <td class="{{ 'positive' if m.net >= 0 else 'negative' }}">${{ '{:,.2f}'.format(m.net) }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </details>
+    </div>
+    <div class="income-and-expenses">
+        <dialog id="add-income-form">
+            <form method="post" action="{{ url_for('add_income') }}">
+                <h2 id="income_dialog_title">Add Income</h2>
+                <input type="hidden" id="income_edit_id" name="id" value="">
+                <label for="income_date">Date:</label>
+                <input type="date" id="income_date" name="date" value="{{ today }}" required>
+                <br>
+                <label for="income_source">Source:</label>
+                <div class="field-with-action">
+                    <select id="income_source" name="source" required>
+                        {% for source in income_sources %}
+                            <option value="{{ source }}">{{ source }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="button" class="icon-btn" title="Add a new source" onclick="toggleNewOptionRow('income_source_new_row')">+</button>
+                    <button type="button" class="icon-btn" title="Manage sources" onclick="document.getElementById('manage-income-sources').showModal()">&#9881;</button>
+                </div>
+                <div id="income_source_new_row" class="new-option-row" hidden>
+                    <input type="text" id="income_source_new_input" placeholder="New source name"
+                           onkeydown="if (event.key === 'Enter') { event.preventDefault(); addNewOption('income_source', 'income_source_new_input', 'income_source_new_row', '{{ url_for('add_income_source') }}'); }">
+                    <button type="button" onclick="addNewOption('income_source', 'income_source_new_input', 'income_source_new_row', '{{ url_for('add_income_source') }}')">Save</button>
+                </div>
+                <br>
+                <label for="income_amount">Amount:</label>
+                <input type="number" id="income_amount" name="amount" step="0.01" required>
+                <br>
+                <label for="income_scheduled_hours">Scheduled Hours:</label>
+                <input type="number" id="income_scheduled_hours" name="scheduled_hours" step="0.01" required>
+                <br>
+                <label for="income_extra_hours">Extra Hours:</label>
+                <input type="number" id="income_extra_hours" name="extra_hours" step="0.01" value="0">
+                <br>
+                <label for="income_description">Description:</label>
+                <textarea id="income_description" name="description"></textarea>
+                <br>
+                <button type="submit" id="income_submit_btn">Add Income</button>
+                <button type="button" onclick="document.getElementById('add-income-form').close()">Cancel</button>
+            </form>
+        </dialog>
+        <dialog id="manage-income-sources" class="dialog-wide">
+            <h2>Manage Income Sources</h2>
+            <div class="manage-list">
+                {% for row in income_sources_detailed %}
+                    <div class="manage-row">
+                        <form method="post" action="{{ url_for('rename_income_source', source_id=row.id) }}">
+                            <input type="text" name="name" value="{{ row.name }}" required>
+                            <button type="submit">Rename</button>
+                        </form>
+                        <span class="manage-usage-count">{{ row.count }} {{ 'entry' if row.count == 1 else 'entries' }}</span>
+                        <form method="post" action="{{ url_for('delete_income_source', source_id=row.id) }}"
+                              onsubmit="return confirm('Delete source {{ row.name }}?');">
+                            <button type="submit" class="btn-danger" {% if row.count > 0 %}disabled title="In use - rename instead of deleting"{% endif %}>Delete</button>
+                        </form>
+                    </div>
+                {% else %}
+                    <p class="empty-state">No sources yet.</p>
+                {% endfor %}
+            </div>
+            <button type="button" onclick="document.getElementById('manage-income-sources').close()">Close</button>
+        </dialog>
+        <div class="income">
+            <div class="income-header">
+                <h2>Income ({{ current_year }})</h2>
+                <button type="button" class="add-btn" onclick="openAddIncome()">Add Income</button>
+            </div>
+            <div class="income-box">
+                {% for income in incomes %}
+                    <div class="entry-row">
+                        <div>
+                            <strong>{{ income.source }}</strong>
+                            <div class="entry-meta">{{ income.date.strftime('%b %d, %Y') }}{% if income.description %} &middot; {{ income.description }}{% endif %}</div>
+                        </div>
+                        <div class="entry-trailing">
+                            <div class="entry-amount positive">${{ '%.2f'|format(income.amount) }}</div>
+                            <div class="entry-actions">
+                                <button type="button" class="row-action" title="Edit" aria-label="Edit income entry"
+                                        onclick='openEditIncome({{ income.id|tojson }}, {{ income.date.strftime('%Y-%m-%d')|tojson }}, {{ income.source|tojson }}, {{ income.amount|tojson }}, {{ income.scheduled_hours|tojson }}, {{ income.extra_hours|tojson }}, {{ (income.description or '')|tojson }})'>&#9998;</button>
+                                <form method="post" action="{{ url_for('delete_income', income_id=income.id) }}" class="row-action-form"
+                                      onsubmit="return confirm('Delete this income entry?');">
+                                    <button type="submit" class="row-action danger" title="Delete" aria-label="Delete income entry">&#10005;</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                {% else %}
+                    <p>No income recorded yet this year.</p>
+                {% endfor %}
+            </div>
+        </div>
+        <dialog id="add-expense-form">
+            <form method="post" action="{{ url_for('add_expense') }}">
+                <h2 id="expense_dialog_title">Add Expense</h2>
+                <input type="hidden" id="expense_edit_id" name="id" value="">
+                <label for="expense_date">Date:</label>
+                <input type="date" id="expense_date" name="date" value="{{ today }}" required>
+                <br>
+                <label for="expense_amount">Amount:</label>
+                <input type="number" id="expense_amount" name="amount" step="0.01" required>
+                <br>
+                <label for="expense_category">Category:</label>
+                <div class="field-with-action">
+                    <select id="expense_category" name="category" required>
+                        {% for category in expense_categories %}
+                            <option value="{{ category }}">{{ category }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="button" class="icon-btn" title="Add a new category" onclick="toggleNewOptionRow('expense_category_new_row')">+</button>
+                    <button type="button" class="icon-btn" title="Manage categories" onclick="document.getElementById('manage-expense-categories').showModal()">&#9881;</button>
+                </div>
+                <div id="expense_category_new_row" class="new-option-row" hidden>
+                    <input type="text" id="expense_category_new_input" placeholder="New category name"
+                           onkeydown="if (event.key === 'Enter') { event.preventDefault(); addNewOption('expense_category', 'expense_category_new_input', 'expense_category_new_row', '{{ url_for('add_expense_category') }}'); }">
+                    <button type="button" onclick="addNewOption('expense_category', 'expense_category_new_input', 'expense_category_new_row', '{{ url_for('add_expense_category') }}')">Save</button>
+                </div>
+                <br>
+                <label for="expense_description">Description:</label>
+                <textarea id="expense_description" name="description"></textarea>
+                <br>
+                <button type="submit" id="expense_submit_btn">Add Expense</button>
+                <button type="button" onclick="document.getElementById('add-expense-form').close()">Cancel</button>
+            </form>
+        </dialog>
+        <dialog id="manage-expense-categories" class="dialog-wide">
+            <h2>Manage Expense Categories</h2>
+            <div class="manage-list">
+                {% for row in expense_categories_detailed %}
+                    <div class="manage-row">
+                        <form method="post" action="{{ url_for('rename_expense_category', category_id=row.id) }}">
+                            <input type="text" name="name" value="{{ row.name }}" required>
+                            <button type="submit">Rename</button>
+                        </form>
+                        <span class="manage-usage-count">{{ row.count }} {{ 'entry' if row.count == 1 else 'entries' }}</span>
+                        <form method="post" action="{{ url_for('delete_expense_category', category_id=row.id) }}"
+                              onsubmit="return confirm('Delete category {{ row.name }}?');">
+                            <button type="submit" class="btn-danger" {% if row.count > 0 %}disabled title="In use - rename instead of deleting"{% endif %}>Delete</button>
+                        </form>
+                    </div>
+                {% else %}
+                    <p class="empty-state">No categories yet.</p>
+                {% endfor %}
+            </div>
+            <button type="button" onclick="document.getElementById('manage-expense-categories').close()">Close</button>
+        </dialog>
+        <div class="expenses">
+            <div class="expenses-header">
+                <h2>Expenses ({{ current_year }})</h2>
+                <button type="button" class="add-btn" onclick="openAddExpense()">Add Expense</button>
+            </div>
+            <div class="expenses-box">
+                {% for expense in expenses %}
+                    <div class="entry-row">
+                        <div>
+                            <strong>{{ expense.category }}</strong>
+                            <div class="entry-meta">{{ expense.date.strftime('%b %d, %Y') }}{% if expense.description %} &middot; {{ expense.description }}{% endif %}</div>
+                        </div>
+                        <div class="entry-trailing">
+                            <div class="entry-amount negative">${{ '%.2f'|format(expense.amount) }}</div>
+                            <div class="entry-actions">
+                                <button type="button" class="row-action" title="Edit" aria-label="Edit expense entry"
+                                        onclick='openEditExpense({{ expense.id|tojson }}, {{ expense.date.strftime('%Y-%m-%d')|tojson }}, {{ expense.category|tojson }}, {{ expense.amount|tojson }}, {{ (expense.description or '')|tojson }})'>&#9998;</button>
+                                <form method="post" action="{{ url_for('delete_expense', expense_id=expense.id) }}" class="row-action-form"
+                                      onsubmit="return confirm('Delete this expense entry?');">
+                                    <button type="submit" class="row-action danger" title="Delete" aria-label="Delete expense entry">&#10005;</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                {% else %}
+                    <p>No expenses recorded yet this year.</p>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+{% endblock %}
+{% block scripts %}
+<script>
+    function openAddIncome() {
+        document.getElementById('add-income-form').querySelector('form').reset();
+        document.getElementById('income_edit_id').value = '';
+        document.getElementById('income_dialog_title').textContent = 'Add Income';
+        document.getElementById('income_submit_btn').textContent = 'Add Income';
+        document.getElementById('add-income-form').showModal();
+    }
+
+    function openEditIncome(id, date, source, amount, scheduledHours, extraHours, description) {
+        document.getElementById('income_edit_id').value = id;
+        document.getElementById('income_dialog_title').textContent = 'Edit Income';
+        document.getElementById('income_submit_btn').textContent = 'Save Changes';
+        document.getElementById('income_date').value = date;
+        document.getElementById('income_source').value = source;
+        document.getElementById('income_amount').value = amount;
+        document.getElementById('income_scheduled_hours').value = scheduledHours;
+        document.getElementById('income_extra_hours').value = extraHours;
+        document.getElementById('income_description').value = description;
+        document.getElementById('add-income-form').showModal();
+    }
+
+    function openAddExpense() {
+        document.getElementById('add-expense-form').querySelector('form').reset();
+        document.getElementById('expense_edit_id').value = '';
+        document.getElementById('expense_dialog_title').textContent = 'Add Expense';
+        document.getElementById('expense_submit_btn').textContent = 'Add Expense';
+        document.getElementById('add-expense-form').showModal();
+    }
+
+    function openEditExpense(id, date, category, amount, description) {
+        document.getElementById('expense_edit_id').value = id;
+        document.getElementById('expense_dialog_title').textContent = 'Edit Expense';
+        document.getElementById('expense_submit_btn').textContent = 'Save Changes';
+        document.getElementById('expense_date').value = date;
+        document.getElementById('expense_category').value = category;
+        document.getElementById('expense_amount').value = amount;
+        document.getElementById('expense_description').value = description;
+        document.getElementById('add-expense-form').showModal();
+    }
+</script>
+{% endblock %}

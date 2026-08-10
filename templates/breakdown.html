@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Breakdown{% endblock %}
+{% block content %}
+    <div class="card" style="margin-top: 20px;">
+        <div class="yearly-pnl-header">
+            <div class="period-nav">
+                <button type="button" class="period-nav-btn" title="Previous month"
+                        onclick="window.location.href='{{ url_for('breakdown', year=prev_year, month=prev_month) }}'">&lsaquo;</button>
+                <h1>{{ month_label }}</h1>
+                <button type="button" class="period-nav-btn" title="Next month" {% if not can_go_next %}disabled{% endif %}
+                        onclick="window.location.href='{{ url_for('breakdown', year=next_year, month=next_month) }}'">&rsaquo;</button>
+            </div>
+        </div>
+
+        <div class="breakdown-section">
+            <h2>Expenses by Category</h2>
+            <div class="breakdown-total">Total: ${{ '{:,.2f}'.format(total_expenses) }}{% if expense_rows %} across {{ expense_rows|length }} categor{{ 'y' if expense_rows|length == 1 else 'ies' }}{% endif %}</div>
+            {% for row in expense_rows %}
+                <div class="breakdown-row">
+                    <div class="breakdown-row-label" title="{{ row.label }}">{{ row.label }}</div>
+                    <div class="breakdown-bar-track">
+                        <div class="breakdown-bar-fill expense" style="width: {{ row.bar_pct }}%;"></div>
+                    </div>
+                    <div class="breakdown-row-value">
+                        <strong>${{ '{:,.2f}'.format(row.amount) }}</strong>
+                        {{ '%.0f'|format(row.pct_of_total) }}%
+                    </div>
+                </div>
+            {% else %}
+                <p class="breakdown-empty">No expenses recorded for this month.</p>
+            {% endfor %}
+        </div>
+
+        <div class="breakdown-section">
+            <h2>Income by Source</h2>
+            <div class="breakdown-total">Total: ${{ '{:,.2f}'.format(total_income) }}{% if income_rows %} across {{ income_rows|length }} source{{ 's' if income_rows|length != 1 else '' }}{% endif %}</div>
+            {% for row in income_rows %}
+                <div class="breakdown-row">
+                    <div class="breakdown-row-label" title="{{ row.label }}">{{ row.label }}</div>
+                    <div class="breakdown-bar-track">
+                        <div class="breakdown-bar-fill income" style="width: {{ row.bar_pct }}%;"></div>
+                    </div>
+                    <div class="breakdown-row-value">
+                        <strong>${{ '{:,.2f}'.format(row.amount) }}</strong>
+                        {{ '%.0f'|format(row.pct_of_total) }}%
+                    </div>
+                </div>
+            {% else %}
+                <p class="breakdown-empty">No income recorded for this month.</p>
+            {% endfor %}
+        </div>
+    </div>
+{% endblock %}
