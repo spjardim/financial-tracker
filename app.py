@@ -4,7 +4,7 @@ import datetime
 import math
 from flask import Flask, render_template, request, url_for, redirect, flash, jsonify
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 
 basedir = os.path.abspath(os.path.dirname(__file__))
@@ -18,6 +18,15 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key')
 
 expense_tracker = SQLAlchemy(app)
+
+# What kind of payment a line item represents - independent of source, since one
+# job can pay both tips (real hours worked) and a periodic shift-pay differential
+# or salary (no new hours). Only 'tips' entries carry scheduled/extra hours, so
+# hourly-rate analysis can include only the entries that actually represent hours worked.
+INCOME_ENTRY_TYPES = ['tips', 'shift_pay', 'salary']
+INCOME_ENTRY_TYPE_LABELS = {'tips': 'Tips', 'shift_pay': 'Shift Pay', 'salary': 'Salary'}
+INCOME_SHIFTS = ['day', 'night']
+
 
 class Expense(expense_tracker.Model):
     id = expense_tracker.Column(expense_tracker.Integer, primary_key=True)
@@ -36,6 +45,8 @@ class Income(expense_tracker.Model):
     scheduled_hours = expense_tracker.Column(expense_tracker.Float, nullable=False)
     extra_hours = expense_tracker.Column(expense_tracker.Float, nullable=False)
     source = expense_tracker.Column(expense_tracker.String(50), nullable=False)
+    entry_type = expense_tracker.Column(expense_tracker.String(20), nullable=False, default='tips')
+    shift = expense_tracker.Column(expense_tracker.String(10))
     description = expense_tracker.Column(expense_tracker.String(200))
     date = expense_tracker.Column(expense_tracker.DateTime, default=datetime.datetime.utcnow)
 
@@ -59,6 +70,17 @@ class ExpenseCategory(expense_tracker.Model):
         return f'<ExpenseCategory {self.name}>'
 
 
+def _migrate_income_columns():
+    """Backfill entry_type/shift onto an income table created before they existed."""
+    with expense_tracker.engine.connect() as conn:
+        existing_columns = {row[1] for row in conn.execute(text('PRAGMA table_info(income)'))}
+        if 'entry_type' not in existing_columns:
+            conn.execute(text("ALTER TABLE income ADD COLUMN entry_type VARCHAR(20) NOT NULL DEFAULT 'tips'"))
+        if 'shift' not in existing_columns:
+            conn.execute(text('ALTER TABLE income ADD COLUMN shift VARCHAR(10)'))
+        conn.commit()
+
+
 def _seed_lookup_tables():
     """Backfill the source/category lookup tables from existing rows the first time they run."""
     if IncomeSource.query.count() == 0:
@@ -75,6 +97,7 @@ def _seed_lookup_tables():
 
 with app.app_context():
     expense_tracker.create_all()
+    _migrate_income_columns()
     _seed_lookup_tables()
 
 CHART_PLOT_HEIGHT = 212  # px, excludes the x-axis label band
@@ -181,6 +204,9 @@ def index():
         expense_categories=expense_categories,
         income_sources_detailed=income_sources_detailed,
         expense_categories_detailed=expense_categories_detailed,
+        income_entry_types=INCOME_ENTRY_TYPES,
+        income_entry_type_labels=INCOME_ENTRY_TYPE_LABELS,
+        income_shifts=INCOME_SHIFTS,
     )
 
 
@@ -239,19 +265,32 @@ def add_expense():
 def add_income():
     income_id = request.form.get('id')
     amount = request.form.get('amount')
+    entry_type = request.form.get('entry_type') or 'tips'
     scheduled_hours = request.form.get('scheduled_hours')
     extra_hours = request.form.get('extra_hours') or '0'
     source = request.form.get('source')
+    shift = request.form.get('shift') or None
     description = request.form.get('description')
 
-    if not amount or not scheduled_hours or not source:
-        flash('Amount, scheduled hours, and source are required for income.')
+    if entry_type not in INCOME_ENTRY_TYPES:
+        flash('Invalid income type.')
+        return redirect(url_for('index'))
+    if shift and shift not in INCOME_SHIFTS:
+        flash('Invalid shift.')
+        return redirect(url_for('index'))
+
+    # Only 'tips' entries represent hours actually worked - shift_pay/salary entries
+    # are payments on hours already logged elsewhere, so they don't track hours.
+    tracks_hours = entry_type == 'tips'
+
+    if not amount or not source or (tracks_hours and not scheduled_hours):
+        flash('Amount and source are required, and scheduled hours are required for tips entries.')
         return redirect(url_for('index'))
 
     try:
         amount = float(amount)
-        scheduled_hours = float(scheduled_hours)
-        extra_hours = float(extra_hours)
+        scheduled_hours = float(scheduled_hours) if tracks_hours else 0.0
+        extra_hours = float(extra_hours) if tracks_hours else 0.0
     except ValueError:
         flash('Amount, scheduled hours, and extra hours must be numbers.')
         return redirect(url_for('index'))
@@ -267,12 +306,14 @@ def add_income():
         income.scheduled_hours = scheduled_hours
         income.extra_hours = extra_hours
         income.source = source
+        income.entry_type = entry_type
+        income.shift = shift
         income.description = description
         income.date = entry_date
     else:
         expense_tracker.session.add(Income(
             amount=amount, scheduled_hours=scheduled_hours, extra_hours=extra_hours,
-            source=source, description=description, date=entry_date,
+            source=source, entry_type=entry_type, shift=shift, description=description, date=entry_date,
         ))
 
     expense_tracker.session.commit()

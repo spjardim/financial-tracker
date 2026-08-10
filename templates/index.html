@@ -83,12 +83,29 @@
                 <label for="income_amount">Amount:</label>
                 <input type="number" id="income_amount" name="amount" step="0.01" required>
                 <br>
-                <label for="income_scheduled_hours">Scheduled Hours:</label>
-                <input type="number" id="income_scheduled_hours" name="scheduled_hours" step="0.01" required>
+                <label for="income_entry_type">Type:</label>
+                <select id="income_entry_type" name="entry_type" onchange="updateIncomeHoursVisibility()">
+                    {% for entry_type in income_entry_types %}
+                        <option value="{{ entry_type }}">{{ income_entry_type_labels[entry_type] }}</option>
+                    {% endfor %}
+                </select>
                 <br>
-                <label for="income_extra_hours">Extra Hours:</label>
-                <input type="number" id="income_extra_hours" name="extra_hours" step="0.01" value="0">
+                <label for="income_shift">Shift:</label>
+                <select id="income_shift" name="shift">
+                    <option value="">None</option>
+                    {% for shift in income_shifts %}
+                        <option value="{{ shift }}">{{ shift|capitalize }}</option>
+                    {% endfor %}
+                </select>
                 <br>
+                <div id="income_hours_fields">
+                    <label for="income_scheduled_hours">Scheduled Hours:</label>
+                    <input type="number" id="income_scheduled_hours" name="scheduled_hours" step="0.01" required>
+                    <br>
+                    <label for="income_extra_hours">Extra Hours:</label>
+                    <input type="number" id="income_extra_hours" name="extra_hours" step="0.01" value="0">
+                    <br>
+                </div>
                 <label for="income_description">Description:</label>
                 <textarea id="income_description" name="description"></textarea>
                 <br>
@@ -127,13 +144,18 @@
                     <div class="entry-row">
                         <div>
                             <strong>{{ income.source }}</strong>
-                            <div class="entry-meta">{{ income.date.strftime('%b %d, %Y') }}{% if income.description %} &middot; {{ income.description }}{% endif %}</div>
+                            <div class="entry-meta">
+                                {{ income.date.strftime('%b %d, %Y') }}
+                                &middot; {{ income_entry_type_labels[income.entry_type] }}
+                                {% if income.shift %} &middot; {{ income.shift|capitalize }}{% endif %}
+                                {% if income.description %} &middot; {{ income.description }}{% endif %}
+                            </div>
                         </div>
                         <div class="entry-trailing">
                             <div class="entry-amount positive">${{ '%.2f'|format(income.amount) }}</div>
                             <div class="entry-actions">
                                 <button type="button" class="row-action" title="Edit" aria-label="Edit income entry"
-                                        onclick='openEditIncome({{ income.id|tojson }}, {{ income.date.strftime('%Y-%m-%d')|tojson }}, {{ income.source|tojson }}, {{ income.amount|tojson }}, {{ income.scheduled_hours|tojson }}, {{ income.extra_hours|tojson }}, {{ (income.description or '')|tojson }})'>&#9998;</button>
+                                        onclick='openEditIncome({{ income.id|tojson }}, {{ income.date.strftime('%Y-%m-%d')|tojson }}, {{ income.source|tojson }}, {{ income.amount|tojson }}, {{ income.scheduled_hours|tojson }}, {{ income.extra_hours|tojson }}, {{ (income.description or '')|tojson }}, {{ income.entry_type|tojson }}, {{ (income.shift or '')|tojson }})'>&#9998;</button>
                                 <form method="post" action="{{ url_for('delete_income', income_id=income.id) }}" class="row-action-form"
                                       onsubmit="return confirm('Delete this income entry?');">
                                     <button type="submit" class="row-action danger" title="Delete" aria-label="Delete income entry">&#10005;</button>
@@ -233,21 +255,31 @@
 {% endblock %}
 {% block scripts %}
 <script>
+    function updateIncomeHoursVisibility() {
+        const tracksHours = document.getElementById('income_entry_type').value === 'tips';
+        document.getElementById('income_hours_fields').hidden = !tracksHours;
+        document.getElementById('income_scheduled_hours').required = tracksHours;
+    }
+
     function openAddIncome() {
         document.getElementById('add-income-form').querySelector('form').reset();
         document.getElementById('income_edit_id').value = '';
         document.getElementById('income_dialog_title').textContent = 'Add Income';
         document.getElementById('income_submit_btn').textContent = 'Add Income';
+        updateIncomeHoursVisibility();
         document.getElementById('add-income-form').showModal();
     }
 
-    function openEditIncome(id, date, source, amount, scheduledHours, extraHours, description) {
+    function openEditIncome(id, date, source, amount, scheduledHours, extraHours, description, entryType, shift) {
         document.getElementById('income_edit_id').value = id;
         document.getElementById('income_dialog_title').textContent = 'Edit Income';
         document.getElementById('income_submit_btn').textContent = 'Save Changes';
         document.getElementById('income_date').value = date;
         document.getElementById('income_source').value = source;
         document.getElementById('income_amount').value = amount;
+        document.getElementById('income_entry_type').value = entryType || 'tips';
+        document.getElementById('income_shift').value = shift || '';
+        updateIncomeHoursVisibility();
         document.getElementById('income_scheduled_hours').value = scheduledHours;
         document.getElementById('income_extra_hours').value = extraHours;
         document.getElementById('income_description').value = description;
