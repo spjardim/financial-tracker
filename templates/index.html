@@ -148,6 +148,12 @@
                                 {{ income.date.strftime('%b %d, %Y') }}
                                 &middot; {{ income_entry_type_labels[income.entry_type] }}
                                 {% if income.shift %} &middot; {{ income.shift|capitalize }}{% endif %}
+                                {% if income.entry_type == 'tips' and income.scheduled_hours > 0 %}
+                                    &middot; ${{ '%.2f'|format(income.amount / income.scheduled_hours) }}/hr scheduled
+                                {% endif %}
+                                {% if income.entry_type == 'tips' and (income.scheduled_hours + income.extra_hours) > 0 %}
+                                    &middot; ${{ '%.2f'|format(income.amount / (income.scheduled_hours + income.extra_hours)) }}/hr total
+                                {% endif %}
                                 {% if income.description %} &middot; {{ income.description }}{% endif %}
                             </div>
                         </div>
