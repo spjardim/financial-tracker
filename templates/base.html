@@ -74,11 +74,11 @@
             text-decoration: none;
             font-size: 16px;
         }
-        .nav-links {
+        .view-toggle {
             display: flex;
             gap: 4px;
         }
-        .nav-links a {
+        .view-toggle-btn {
             color: var(--text-secondary);
             text-decoration: none;
             font-size: 14px;
@@ -87,10 +87,10 @@
             border: 1px solid transparent;
             transition: color 0.15s ease, border-color 0.15s ease;
         }
-        .nav-links a:hover {
+        .view-toggle-btn:hover {
             color: var(--text-primary);
         }
-        .nav-links a.active {
+        .view-toggle-btn.active {
             color: var(--accent);
             border-color: rgba(34, 211, 238, 0.35);
             background: var(--accent-soft);
@@ -116,6 +116,103 @@
         }
         .card h1 {
             text-shadow: 0 0 18px rgba(34, 211, 238, 0.25);
+        }
+        .kpi-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 24px;
+        }
+        .stat-tile {
+            flex: 1 1 160px;
+            min-width: 140px;
+        }
+        .stat-label {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+        .stat-value {
+            font-size: 26px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .stat-value.positive { color: var(--color-good); }
+        .stat-value.negative { color: var(--text-negative); }
+        .stat-delta {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+        .stat-delta.positive { color: var(--color-good); }
+        .stat-delta.negative { color: var(--text-negative); }
+
+        .net-worth-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .net-worth-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .net-worth-stats {
+            margin-bottom: 8px;
+        }
+        .line-chart {
+            position: absolute;
+            top: 0;
+            right: 0;
+            bottom: 28px;
+            left: 56px;
+        }
+        .line-chart svg {
+            display: block;
+            width: 100%;
+            height: 100%;
+            overflow: visible;
+        }
+        .net-worth-line {
+            fill: none;
+            stroke: var(--accent);
+            stroke-width: 2;
+            stroke-linejoin: round;
+            stroke-linecap: round;
+            vector-effect: non-scaling-stroke;
+        }
+        .net-worth-point {
+            fill: var(--accent);
+            stroke: var(--surface-card);
+            stroke-width: 2;
+            vector-effect: non-scaling-stroke;
+            cursor: pointer;
+        }
+        .net-worth-point:hover,
+        .net-worth-point:focus-visible {
+            filter: brightness(1.3);
+            outline: none;
+        }
+        .gridline.gridline-zero {
+            border-top-color: var(--border-strong);
+        }
+        .line-chart-endpoints {
+            display: flex;
+            justify-content: space-between;
+            margin-top: -22px;
+            padding-left: 56px;
+            position: relative;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .manage-group-add select {
+            width: auto;
+        }
+        form.manage-group-add {
+            display: flex;
+            gap: 8px;
+            margin-top: 6px;
         }
 
         .yearly-pnl,
@@ -235,9 +332,24 @@
             align-items: flex-end;
             padding-bottom: 28px;
             gap: 6px;
+            overflow-x: auto;
+            overflow-y: hidden;
+            scrollbar-color: var(--border-strong) transparent;
+            scrollbar-width: thin;
+        }
+        .chart-bars::-webkit-scrollbar {
+            height: 8px;
+        }
+        .chart-bars::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .chart-bars::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 4px;
         }
         .month-group {
-            flex: 1;
+            flex: 1 1 40px;
+            min-width: 40px;
             position: relative;
             display: flex;
             justify-content: center;
@@ -250,33 +362,13 @@
         .bar {
             width: 12px;
             border-radius: 4px 4px 0 0;
+            cursor: pointer;
         }
         .bar.bar-income { background: var(--color-good); }
         .bar.bar-expense { background: var(--color-critical); }
         .bar:hover, .bar:focus-visible {
             filter: brightness(1.25);
             outline: none;
-        }
-        .bar[data-tooltip] {
-            position: relative;
-        }
-        .bar[data-tooltip]:hover::after,
-        .bar[data-tooltip]:focus-visible::after {
-            content: attr(data-tooltip);
-            position: absolute;
-            bottom: 100%;
-            left: 50%;
-            transform: translateX(-50%);
-            margin-bottom: 6px;
-            padding: 4px 8px;
-            background: #06090f;
-            border: 1px solid var(--border-strong);
-            color: var(--text-primary);
-            font-size: 12px;
-            white-space: nowrap;
-            border-radius: 4px;
-            pointer-events: none;
-            z-index: 1;
         }
         .month-label {
             position: absolute;
@@ -527,7 +619,8 @@
             gap: 8px;
             align-items: center;
         }
-        .field-with-action select {
+        .field-with-action select,
+        .field-with-action .combobox {
             flex: 1;
             min-width: 0;
         }
@@ -572,11 +665,72 @@
             background: var(--surface-card-alt);
         }
         .breakdown-row-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
             font-size: 14px;
             color: var(--text-primary);
+        }
+        .breakdown-row-label-text {
+            min-width: 0;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+        }
+        .breakdown-swatch {
+            width: 10px;
+            height: 10px;
+            border-radius: 2px;
+            flex: 0 0 auto;
+        }
+        .breakdown-chart-row {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+            flex-wrap: wrap;
+        }
+        .breakdown-list {
+            flex: 1;
+            min-width: 240px;
+        }
+        .donut-chart {
+            flex: 0 0 auto;
+        }
+        .donut-segment {
+            cursor: pointer;
+            transition: filter 0.15s ease;
+        }
+        .donut-segment:hover,
+        .donut-segment:focus-visible {
+            filter: brightness(1.25);
+            outline: none;
+        }
+        .donut-center-label,
+        .donut-center-value {
+            pointer-events: none;
+        }
+        .donut-center-label {
+            fill: var(--text-secondary);
+            font-size: 11px;
+        }
+        .donut-center-value {
+            fill: var(--text-primary);
+            font-size: 20px;
+            font-weight: 700;
+        }
+        .chart-tooltip {
+            position: fixed;
+            transform: translate(-50%, -100%) translateY(-6px);
+            pointer-events: none;
+            padding: 4px 8px;
+            background: #06090f;
+            border: 1px solid var(--border-strong);
+            color: var(--text-primary);
+            font-size: 12px;
+            white-space: nowrap;
+            border-radius: 4px;
+            z-index: 20;
         }
         .breakdown-bar-track {
             height: 14px;
@@ -666,6 +820,54 @@
             min-width: 60px;
             text-align: right;
         }
+
+        .combobox {
+            position: relative;
+        }
+        .combobox-options {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            right: 0;
+            max-height: 180px;
+            overflow-y: auto;
+            background: var(--surface-card-alt);
+            border: 1px solid var(--border-strong);
+            border-radius: 6px;
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5);
+            z-index: 5;
+        }
+        .combobox-option {
+            padding: 8px 10px;
+            font-size: 14px;
+            cursor: pointer;
+            color: var(--text-primary);
+        }
+        .combobox-option:hover,
+        .combobox-option.active {
+            background: var(--accent-soft);
+            color: var(--accent);
+        }
+
+        .manage-group {
+            margin-bottom: 12px;
+        }
+        .manage-group-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin: 12px 0 6px;
+        }
+        .manage-group-add {
+            display: flex;
+            gap: 8px;
+            margin-top: 6px;
+        }
+        .manage-group-add input {
+            flex: 1;
+            min-width: 0;
+            width: auto;
+        }
     </style>
     {% block head %}{% endblock %}
 </head>
@@ -673,10 +875,6 @@
 <nav class="top-nav">
     <div class="top-nav-inner">
         <a class="brand" href="{{ url_for('index') }}">Finances</a>
-        <div class="nav-links">
-            <a href="{{ url_for('index') }}" class="{{ 'active' if active_page == 'dashboard' else '' }}">Dashboard</a>
-            <a href="{{ url_for('breakdown') }}" class="{{ 'active' if active_page == 'breakdown' else '' }}">Breakdown</a>
-        </div>
     </div>
 </nav>
 <div class="container">

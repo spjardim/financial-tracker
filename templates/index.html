@@ -4,11 +4,21 @@
     <div class="yearly-pnl">
         <div class="yearly-pnl-header">
             <div class="period-nav">
-                <button type="button" class="period-nav-btn" title="Previous year"
-                        onclick="window.location.href='{{ url_for('index', year=current_year - 1) }}'">&lsaquo;</button>
-                <h1>{{ current_year }} Overview</h1>
-                <button type="button" class="period-nav-btn" title="Next year" {% if not can_go_next_year %}disabled{% endif %}
-                        onclick="window.location.href='{{ url_for('index', year=current_year + 1) }}'">&rsaquo;</button>
+                {% if view == 'monthly' %}
+                    <button type="button" class="period-nav-btn" title="Previous year"
+                            onclick="window.location.href='{{ url_for('index', view=view, year=prev_year) }}'">&lsaquo;</button>
+                {% endif %}
+                <h1>{{ period_label }} Overview</h1>
+                {% if view == 'monthly' %}
+                    <button type="button" class="period-nav-btn" title="Next year" {% if not can_go_next %}disabled{% endif %}
+                            onclick="window.location.href='{{ url_for('index', view=view, year=next_year) }}'">&rsaquo;</button>
+                {% endif %}
+            </div>
+            <div class="view-toggle" role="group" aria-label="Chart columns">
+                <a class="view-toggle-btn {{ 'active' if view == 'monthly' else '' }}"
+                   href="{{ url_for('index', view='monthly', year=view_year) }}" title="A column per month, for {{ view_year }}">Monthly</a>
+                <a class="view-toggle-btn {{ 'active' if view == 'yearly' else '' }}"
+                   href="{{ url_for('index', view='yearly') }}" title="A column per year, all-time">Yearly</a>
             </div>
             <div class="chart-legend">
                 <span class="legend-item"><span class="legend-swatch swatch-income"></span>Income</span>
@@ -24,15 +34,15 @@
                 {% endfor %}
             </div>
             <div class="chart-bars">
-                {% for m in monthly_pnl %}
+                {% for p in chart_periods %}
                     <div class="month-group">
                         <div class="bar-pair">
-                            <div class="bar bar-income" style="height: {{ m.income_height }}px;"
-                                 tabindex="0" data-tooltip="{{ m.name }} Income: ${{ '{:,.2f}'.format(m.income) }}"></div>
-                            <div class="bar bar-expense" style="height: {{ m.expense_height }}px;"
-                                 tabindex="0" data-tooltip="{{ m.name }} Expenses: ${{ '{:,.2f}'.format(m.expenses) }}"></div>
+                            <div class="bar bar-income" style="height: {{ p.income_height }}px;"
+                                 tabindex="0" data-tooltip="{{ p.name }} Income: ${{ '{:,.2f}'.format(p.income) }}"></div>
+                            <div class="bar bar-expense" style="height: {{ p.expense_height }}px;"
+                                 tabindex="0" data-tooltip="{{ p.name }} Expenses: ${{ '{:,.2f}'.format(p.expenses) }}"></div>
                         </div>
-                        <span class="month-label">{{ m.name }}</span>
+                        <span class="month-label">{{ p.name }}</span>
                     </div>
                 {% endfor %}
             </div>
@@ -41,20 +51,302 @@
             <summary>View as table</summary>
             <table class="chart-table">
                 <thead>
-                    <tr><th>Month</th><th>Income</th><th>Expenses</th><th>Net</th></tr>
+                    <tr><th>{{ 'Year' if view == 'yearly' else 'Month' }}</th><th>Income</th><th>Expenses</th><th>Net</th></tr>
                 </thead>
                 <tbody>
-                    {% for m in monthly_pnl %}
+                    {% for p in chart_periods %}
                         <tr>
-                            <td>{{ m.name }}</td>
-                            <td>${{ '{:,.2f}'.format(m.income) }}</td>
-                            <td>${{ '{:,.2f}'.format(m.expenses) }}</td>
-                            <td class="{{ 'positive' if m.net >= 0 else 'negative' }}">${{ '{:,.2f}'.format(m.net) }}</td>
+                            <td>{{ p.name }}</td>
+                            <td>${{ '{:,.2f}'.format(p.income) }}</td>
+                            <td>${{ '{:,.2f}'.format(p.expenses) }}</td>
+                            <td class="{{ 'positive' if p.net >= 0 else 'negative' }}">${{ '{:,.2f}'.format(p.net) }}</td>
                         </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </details>
+    </div>
+
+    <div class="card kpi-row" style="margin-top: 20px;">
+        <div class="stat-tile">
+            <div class="stat-label">Income</div>
+            <div class="stat-value positive">${{ '{:,.2f}'.format(total_income) }}</div>
+            {% if income_delta_pct is not none %}
+                <div class="stat-delta {{ 'positive' if income_delta_pct >= 0 else 'negative' }}">
+                    {{ '+' if income_delta_pct >= 0 else '' }}{{ '%.0f'|format(income_delta_pct) }}% vs {{ view_year - 1 }}
+                </div>
+            {% endif %}
+        </div>
+        <div class="stat-tile">
+            <div class="stat-label">Expenses</div>
+            <div class="stat-value negative">${{ '{:,.2f}'.format(total_expenses) }}</div>
+            {% if expense_delta_pct is not none %}
+                <div class="stat-delta {{ 'negative' if expense_delta_pct >= 0 else 'positive' }}">
+                    {{ '+' if expense_delta_pct >= 0 else '' }}{{ '%.0f'|format(expense_delta_pct) }}% vs {{ view_year - 1 }}
+                </div>
+            {% endif %}
+        </div>
+        <div class="stat-tile">
+            <div class="stat-label">Net Savings</div>
+            <div class="stat-value {{ 'positive' if net_savings >= 0 else 'negative' }}">${{ '{:,.2f}'.format(net_savings) }}</div>
+            {% if savings_rate is not none %}
+                <div class="stat-delta">{{ '%.0f'|format(savings_rate) }}% of income</div>
+            {% endif %}
+        </div>
+        {% if avg_hourly_rate is not none %}
+            <div class="stat-tile">
+                <div class="stat-label">Avg Hourly (Tips)</div>
+                <div class="stat-value">${{ '%.2f'|format(avg_hourly_rate) }}/hr</div>
+            </div>
+        {% endif %}
+    </div>
+
+    <div class="card net-worth-card" style="margin-top: 20px;">
+        <div class="net-worth-header">
+            <h2>Net Worth</h2>
+            <div class="net-worth-actions">
+                <button type="button" class="add-btn" onclick="document.getElementById('update-balances-form').showModal()">Update Balances</button>
+                <button type="button" class="icon-btn" title="Manage accounts" onclick="document.getElementById('manage-accounts').showModal()">&#9881;</button>
+            </div>
+        </div>
+        {% if net_worth %}
+            <div class="kpi-row net-worth-stats">
+                <div class="stat-tile">
+                    <div class="stat-label">Net worth</div>
+                    <div class="stat-value {{ 'positive' if net_worth.current_net_worth >= 0 else 'negative' }}">{{ net_worth.current_net_worth|money }}</div>
+                    {% if net_worth_delta_pct is not none %}
+                        <div class="stat-delta {{ 'positive' if net_worth_delta_pct >= 0 else 'negative' }}">
+                            {{ '+' if net_worth_delta_pct >= 0 else '' }}{{ '%.1f'|format(net_worth_delta_pct) }}% vs previous month
+                        </div>
+                    {% endif %}
+                </div>
+                <div class="stat-tile">
+                    <div class="stat-label">Assets</div>
+                    <div class="stat-value positive">${{ '{:,.2f}'.format(net_worth.current_assets) }}</div>
+                </div>
+                {% if net_worth.has_investments %}
+                    <div class="stat-tile">
+                        <div class="stat-label">Investments</div>
+                        <div class="stat-value positive">${{ '{:,.2f}'.format(net_worth.current_investments) }}</div>
+                    </div>
+                {% endif %}
+                <div class="stat-tile">
+                    <div class="stat-label">Liabilities</div>
+                    <div class="stat-value negative">${{ '{:,.2f}'.format(net_worth.current_liabilities) }}</div>
+                </div>
+            </div>
+            <div class="chart-plot">
+                <div class="chart-gridlines">
+                    {% for tick in net_worth.axis_ticks %}
+                        <div class="gridline" style="bottom: {{ tick.bottom }}px;">
+                            <span class="gridline-label">{{ tick.value|money(0) }}</span>
+                        </div>
+                    {% endfor %}
+                    {% if net_worth.zero_bottom is not none %}
+                        <div class="gridline gridline-zero" style="bottom: {{ net_worth.zero_bottom }}px;">
+                            <span class="gridline-label">$0</span>
+                        </div>
+                    {% endif %}
+                </div>
+                <div class="line-chart">
+                    <svg viewBox="0 0 1000 {{ chart_plot_height }}" preserveAspectRatio="none" role="img" aria-label="Net worth over time">
+                        <polyline class="net-worth-line" points="{% for p in net_worth.points %}{{ p.x }},{{ p.y }} {% endfor %}"></polyline>
+                        {% for p in net_worth.points %}
+                            <circle class="net-worth-point" cx="{{ p.x }}" cy="{{ p.y }}" r="5" tabindex="0"
+                                    data-tooltip="{{ p.label }}: {{ p.value|money }}"></circle>
+                        {% endfor %}
+                    </svg>
+                </div>
+            </div>
+            <div class="line-chart-endpoints">
+                <span>{{ net_worth.first_label }}</span>
+                <span>{{ net_worth.last_label }}</span>
+            </div>
+        {% else %}
+            <p class="empty-state">No balances recorded yet. Add your accounts with the gear button, then use "Update Balances" at each month-end.</p>
+        {% endif %}
+    </div>
+
+    <dialog id="update-balances-form" class="dialog-wide">
+        <form method="post" action="{{ url_for('save_balances') }}">
+            <h2>Update Balances</h2>
+            {% if accounts_detailed %}
+                <label for="balances_month">Month:</label>
+                <input type="month" id="balances_month" name="month" value="{{ current_month_value }}" required>
+                {% for group_type, group_label in [('asset', 'Assets'), ('investment', 'Investments'), ('liability', 'Liabilities')] %}
+                    <div class="manage-group-title">{{ group_label }}</div>
+                    {% for acc in accounts_detailed if acc.account_type == group_type %}
+                        <label for="balance_{{ acc.id }}">{{ acc.name }}:</label>
+                        <input type="number" step="0.01" id="balance_{{ acc.id }}" name="balance_{{ acc.id }}"
+                               value="{{ acc.latest_balance if acc.latest_balance is not none else '' }}">
+                    {% else %}
+                        <p class="empty-state">None yet.</p>
+                    {% endfor %}
+                {% endfor %}
+                <br>
+                <button type="submit">Save Balances</button>
+            {% else %}
+                <p class="empty-state">Add an account first (gear button), then come back to record balances.</p>
+            {% endif %}
+            <button type="button" onclick="document.getElementById('update-balances-form').close()">Cancel</button>
+        </form>
+    </dialog>
+
+    <dialog id="manage-accounts" class="dialog-wide">
+        <h2>Manage Accounts</h2>
+        <div class="manage-list">
+            {% for acc in accounts_detailed %}
+                <div class="manage-row">
+                    <form method="post" action="{{ url_for('rename_account', account_id=acc.id) }}">
+                        <input type="text" name="name" value="{{ acc.name }}" required>
+                        <button type="submit">Rename</button>
+                    </form>
+                    <span class="manage-usage-count">{{ account_type_labels[acc.account_type] }}</span>
+                    <form method="post" action="{{ url_for('delete_account', account_id=acc.id) }}"
+                          onsubmit="return confirm('Delete account {{ acc.name }}?');">
+                        <button type="submit" class="btn-danger" {% if acc.has_balances %}disabled title="Has recorded balances"{% endif %}>Delete</button>
+                    </form>
+                </div>
+            {% else %}
+                <p class="empty-state">No accounts yet.</p>
+            {% endfor %}
+        </div>
+        <form method="post" action="{{ url_for('add_account') }}" class="manage-group-add">
+            <input type="text" name="name" placeholder="New account name" required>
+            <select name="account_type" required>
+                <option value="asset">Asset (bank, savings)</option>
+                <option value="investment">Investment (brokerage, 401k, crypto)</option>
+                <option value="liability">Liability (loan, credit card)</option>
+            </select>
+            <button type="submit">Add</button>
+        </form>
+        <br>
+        <button type="button" onclick="document.getElementById('manage-accounts').close()">Close</button>
+    </dialog>
+
+    <div class="card breakdown-card" style="margin-top: 20px;">
+        <div class="breakdown-section">
+            <h2>Expenses by Category</h2>
+            <div class="breakdown-total">Total: ${{ '{:,.2f}'.format(total_expenses) }}{% if expense_rows %} across {{ expense_rows|length }} categor{{ 'y' if expense_rows|length == 1 else 'ies' }}{% endif %}</div>
+            <div class="breakdown-chart-row">
+                {% if expense_rows %}
+                    <svg class="donut-chart" viewBox="0 0 200 200" width="160" height="160" role="img" aria-label="Expenses by category">
+                        <g transform="rotate(-90 100 100)">
+                            {% for row in expense_rows %}
+                                <circle class="donut-segment" cx="100" cy="100" r="{{ donut_radius }}" fill="none"
+                                        stroke="{{ row.color }}" stroke-width="26"
+                                        stroke-dasharray="{{ row.dash_array }}" stroke-dashoffset="{{ row.dash_offset }}"
+                                        tabindex="0"
+                                        data-tooltip="{{ row.label }}: ${{ '{:,.2f}'.format(row.amount) }} ({{ '%.0f'|format(row.pct_of_total) }}%)"></circle>
+                            {% endfor %}
+                        </g>
+                        <text x="100" y="94" text-anchor="middle" class="donut-center-label">Total</text>
+                        <text x="100" y="118" text-anchor="middle" class="donut-center-value">${{ '{:,.0f}'.format(total_expenses) }}</text>
+                    </svg>
+                {% endif %}
+                <div class="breakdown-list">
+                    {% for row in expense_rows %}
+                        <div class="breakdown-row">
+                            <div class="breakdown-row-label" title="{{ row.label }}">
+                                <span class="breakdown-swatch" style="background: {{ row.color }};"></span>
+                                <span class="breakdown-row-label-text">{{ row.label }}</span>
+                            </div>
+                            <div class="breakdown-bar-track">
+                                <div class="breakdown-bar-fill expense" style="width: {{ row.bar_pct }}%;"></div>
+                            </div>
+                            <div class="breakdown-row-value">
+                                <strong>${{ '{:,.2f}'.format(row.amount) }}</strong>
+                                {{ '%.0f'|format(row.pct_of_total) }}%
+                            </div>
+                        </div>
+                    {% else %}
+                        <p class="breakdown-empty">No expenses recorded {{ 'this year' if view == 'monthly' else 'yet' }}.</p>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <div class="breakdown-section">
+            <h2>Expenses by Place</h2>
+            <div class="breakdown-total">Total: ${{ '{:,.2f}'.format(total_expenses) }}{% if place_rows %} across {{ place_rows|length }} place{{ 's' if place_rows|length != 1 else '' }}{% endif %}</div>
+            <div class="breakdown-chart-row">
+                {% if place_rows %}
+                    <svg class="donut-chart" viewBox="0 0 200 200" width="160" height="160" role="img" aria-label="Expenses by place">
+                        <g transform="rotate(-90 100 100)">
+                            {% for row in place_rows %}
+                                <circle class="donut-segment" cx="100" cy="100" r="{{ donut_radius }}" fill="none"
+                                        stroke="{{ row.color }}" stroke-width="26"
+                                        stroke-dasharray="{{ row.dash_array }}" stroke-dashoffset="{{ row.dash_offset }}"
+                                        tabindex="0"
+                                        data-tooltip="{{ row.label }}: ${{ '{:,.2f}'.format(row.amount) }} ({{ '%.0f'|format(row.pct_of_total) }}%)"></circle>
+                            {% endfor %}
+                        </g>
+                        <text x="100" y="94" text-anchor="middle" class="donut-center-label">Total</text>
+                        <text x="100" y="118" text-anchor="middle" class="donut-center-value">${{ '{:,.0f}'.format(total_expenses) }}</text>
+                    </svg>
+                {% endif %}
+                <div class="breakdown-list">
+                    {% for row in place_rows %}
+                        <div class="breakdown-row">
+                            <div class="breakdown-row-label" title="{{ row.label }}">
+                                <span class="breakdown-swatch" style="background: {{ row.color }};"></span>
+                                <span class="breakdown-row-label-text">{{ row.label }}</span>
+                            </div>
+                            <div class="breakdown-bar-track">
+                                <div class="breakdown-bar-fill expense" style="width: {{ row.bar_pct }}%;"></div>
+                            </div>
+                            <div class="breakdown-row-value">
+                                <strong>${{ '{:,.2f}'.format(row.amount) }}</strong>
+                                {{ '%.0f'|format(row.pct_of_total) }}%
+                            </div>
+                        </div>
+                    {% else %}
+                        <p class="breakdown-empty">No expenses recorded {{ 'this year' if view == 'monthly' else 'yet' }}.</p>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <div class="breakdown-section">
+            <h2>Income by Source</h2>
+            <div class="breakdown-total">Total: ${{ '{:,.2f}'.format(total_income) }}{% if income_rows %} across {{ income_rows|length }} source{{ 's' if income_rows|length != 1 else '' }}{% endif %}</div>
+            <div class="breakdown-chart-row">
+                {% if income_rows %}
+                    <svg class="donut-chart" viewBox="0 0 200 200" width="160" height="160" role="img" aria-label="Income by source">
+                        <g transform="rotate(-90 100 100)">
+                            {% for row in income_rows %}
+                                <circle class="donut-segment" cx="100" cy="100" r="{{ donut_radius }}" fill="none"
+                                        stroke="{{ row.color }}" stroke-width="26"
+                                        stroke-dasharray="{{ row.dash_array }}" stroke-dashoffset="{{ row.dash_offset }}"
+                                        tabindex="0"
+                                        data-tooltip="{{ row.label }}: ${{ '{:,.2f}'.format(row.amount) }} ({{ '%.0f'|format(row.pct_of_total) }}%)"></circle>
+                            {% endfor %}
+                        </g>
+                        <text x="100" y="94" text-anchor="middle" class="donut-center-label">Total</text>
+                        <text x="100" y="118" text-anchor="middle" class="donut-center-value">${{ '{:,.0f}'.format(total_income) }}</text>
+                    </svg>
+                {% endif %}
+                <div class="breakdown-list">
+                    {% for row in income_rows %}
+                        <div class="breakdown-row">
+                            <div class="breakdown-row-label" title="{{ row.label }}">
+                                <span class="breakdown-swatch" style="background: {{ row.color }};"></span>
+                                <span class="breakdown-row-label-text">{{ row.label }}</span>
+                            </div>
+                            <div class="breakdown-bar-track">
+                                <div class="breakdown-bar-fill income" style="width: {{ row.bar_pct }}%;"></div>
+                            </div>
+                            <div class="breakdown-row-value">
+                                <strong>${{ '{:,.2f}'.format(row.amount) }}</strong>
+                                {{ '%.0f'|format(row.pct_of_total) }}%
+                            </div>
+                        </div>
+                    {% else %}
+                        <p class="breakdown-empty">No income recorded {{ 'this year' if view == 'monthly' else 'yet' }}.</p>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
     </div>
     <div class="income-and-expenses">
         <dialog id="add-income-form">
@@ -136,7 +428,7 @@
         </dialog>
         <div class="income">
             <div class="income-header">
-                <h2>Income ({{ current_year }})</h2>
+                <h2>Income ({{ period_label }})</h2>
                 <button type="button" class="add-btn" onclick="openAddIncome()">Add Income</button>
             </div>
             <div class="income-box">
@@ -186,7 +478,7 @@
                 <br>
                 <label for="expense_category">Category:</label>
                 <div class="field-with-action">
-                    <select id="expense_category" name="category" required>
+                    <select id="expense_category" name="category" required onchange="updateExpenseSubcategoryOptions()">
                         {% for category in expense_categories %}
                             <option value="{{ category }}">{{ category }}</option>
                         {% endfor %}
@@ -198,6 +490,30 @@
                     <input type="text" id="expense_category_new_input" placeholder="New category name"
                            onkeydown="if (event.key === 'Enter') { event.preventDefault(); addNewOption('expense_category', 'expense_category_new_input', 'expense_category_new_row', '{{ url_for('add_expense_category') }}'); }">
                     <button type="button" onclick="addNewOption('expense_category', 'expense_category_new_input', 'expense_category_new_row', '{{ url_for('add_expense_category') }}')">Save</button>
+                </div>
+                <br>
+                <label for="expense_subcategory">Subcategory:</label>
+                <div class="field-with-action">
+                    <select id="expense_subcategory" name="sub_category">
+                        <option value="">None (defaults to Misc)</option>
+                    </select>
+                    <button type="button" class="icon-btn" title="Add a new subcategory" onclick="toggleNewOptionRow('expense_subcategory_new_row')">+</button>
+                    <button type="button" class="icon-btn" title="Manage subcategories" onclick="document.getElementById('manage-expense-subcategories').showModal()">&#9881;</button>
+                </div>
+                <div id="expense_subcategory_new_row" class="new-option-row" hidden>
+                    <input type="text" id="expense_subcategory_new_input" placeholder="New subcategory name"
+                           onkeydown="if (event.key === 'Enter') { event.preventDefault(); addNewExpenseSubcategory(); }">
+                    <button type="button" onclick="addNewExpenseSubcategory()">Save</button>
+                </div>
+                <br>
+                <label for="expense_place">Place:</label>
+                <div class="field-with-action">
+                    <div class="combobox">
+                        <input type="text" id="expense_place" name="place" autocomplete="off" placeholder="e.g. Target"
+                               oninput="filterPlaceOptions()" onfocus="filterPlaceOptions()" onkeydown="handlePlaceKeydown(event)">
+                        <div id="expense_place_options" class="combobox-options" hidden></div>
+                    </div>
+                    <button type="button" class="icon-btn" title="Manage places" onclick="document.getElementById('manage-expense-places').showModal()">&#9881;</button>
                 </div>
                 <br>
                 <label for="expense_description">Description:</label>
@@ -228,23 +544,80 @@
             </div>
             <button type="button" onclick="document.getElementById('manage-expense-categories').close()">Close</button>
         </dialog>
+        <dialog id="manage-expense-subcategories" class="dialog-wide">
+            <h2>Manage Expense Subcategories</h2>
+            <div class="manage-list">
+                {% for category in expense_categories_detailed %}
+                    <div class="manage-group">
+                        <div class="manage-group-title">{{ category.name }}</div>
+                        {% for row in expense_subcategories_detailed if row.category_id == category.id %}
+                            <div class="manage-row">
+                                <form method="post" action="{{ url_for('rename_expense_subcategory', subcategory_id=row.id) }}">
+                                    <input type="text" name="name" value="{{ row.name }}" required>
+                                    <button type="submit">Rename</button>
+                                </form>
+                                <span class="manage-usage-count">{{ row.count }} {{ 'entry' if row.count == 1 else 'entries' }}</span>
+                                <form method="post" action="{{ url_for('delete_expense_subcategory', subcategory_id=row.id) }}"
+                                      onsubmit="return confirm('Delete subcategory {{ row.name }}?');">
+                                    <button type="submit" class="btn-danger" {% if row.count > 0 %}disabled title="In use - rename instead of deleting"{% endif %}>Delete</button>
+                                </form>
+                            </div>
+                        {% else %}
+                            <p class="empty-state">No subcategories yet.</p>
+                        {% endfor %}
+                        <div class="manage-group-add">
+                            <input type="text" placeholder="New subcategory in {{ category.name }}" id="new_subcategory_input_{{ category.id }}">
+                            <button type="button" onclick='addSubcategoryToCategory({{ category.id|tojson }}, {{ category.name|tojson }})'>Add</button>
+                        </div>
+                    </div>
+                {% else %}
+                    <p class="empty-state">No categories yet - add a category first.</p>
+                {% endfor %}
+            </div>
+            <button type="button" onclick="document.getElementById('manage-expense-subcategories').close()">Close</button>
+        </dialog>
+        <dialog id="manage-expense-places" class="dialog-wide">
+            <h2>Manage Expense Places</h2>
+            <div class="manage-list">
+                {% for row in expense_places_detailed %}
+                    <div class="manage-row">
+                        <form method="post" action="{{ url_for('rename_expense_place', place_id=row.id) }}">
+                            <input type="text" name="name" value="{{ row.name }}" required>
+                            <button type="submit">Rename</button>
+                        </form>
+                        <span class="manage-usage-count">{{ row.count }} {{ 'entry' if row.count == 1 else 'entries' }}</span>
+                        <form method="post" action="{{ url_for('delete_expense_place', place_id=row.id) }}"
+                              onsubmit="return confirm('Delete place {{ row.name }}?');">
+                            <button type="submit" class="btn-danger" {% if row.count > 0 %}disabled title="In use - rename instead of deleting"{% endif %}>Delete</button>
+                        </form>
+                    </div>
+                {% else %}
+                    <p class="empty-state">No places yet.</p>
+                {% endfor %}
+            </div>
+            <button type="button" onclick="document.getElementById('manage-expense-places').close()">Close</button>
+        </dialog>
         <div class="expenses">
             <div class="expenses-header">
-                <h2>Expenses ({{ current_year }})</h2>
+                <h2>Expenses ({{ period_label }})</h2>
                 <button type="button" class="add-btn" onclick="openAddExpense()">Add Expense</button>
             </div>
             <div class="expenses-box">
                 {% for expense in expenses %}
                     <div class="entry-row">
                         <div>
-                            <strong>{{ expense.category }}</strong>
-                            <div class="entry-meta">{{ expense.date.strftime('%b %d, %Y') }}{% if expense.description %} &middot; {{ expense.description }}{% endif %}</div>
+                            <strong>{{ expense.category }}{% if expense.sub_category %} &rsaquo; {{ expense.sub_category }}{% endif %}</strong>
+                            <div class="entry-meta">
+                                {{ expense.date.strftime('%b %d, %Y') }}
+                                {% if expense.place %} &middot; {{ expense.place }}{% endif %}
+                                {% if expense.description %} &middot; {{ expense.description }}{% endif %}
+                            </div>
                         </div>
                         <div class="entry-trailing">
                             <div class="entry-amount negative">${{ '%.2f'|format(expense.amount) }}</div>
                             <div class="entry-actions">
                                 <button type="button" class="row-action" title="Edit" aria-label="Edit expense entry"
-                                        onclick='openEditExpense({{ expense.id|tojson }}, {{ expense.date.strftime('%Y-%m-%d')|tojson }}, {{ expense.category|tojson }}, {{ expense.amount|tojson }}, {{ (expense.description or '')|tojson }})'>&#9998;</button>
+                                        onclick='openEditExpense({{ expense.id|tojson }}, {{ expense.date.strftime('%Y-%m-%d')|tojson }}, {{ expense.category|tojson }}, {{ (expense.sub_category or '')|tojson }}, {{ (expense.place or '')|tojson }}, {{ expense.amount|tojson }}, {{ (expense.description or '')|tojson }})'>&#9998;</button>
                                 <form method="post" action="{{ url_for('delete_expense', expense_id=expense.id) }}" class="row-action-form"
                                       onsubmit="return confirm('Delete this expense entry?');">
                                     <button type="submit" class="row-action danger" title="Delete" aria-label="Delete expense entry">&#10005;</button>
@@ -297,18 +670,252 @@
         document.getElementById('expense_edit_id').value = '';
         document.getElementById('expense_dialog_title').textContent = 'Add Expense';
         document.getElementById('expense_submit_btn').textContent = 'Add Expense';
+        updateExpenseSubcategoryOptions();
         document.getElementById('add-expense-form').showModal();
     }
 
-    function openEditExpense(id, date, category, amount, description) {
+    function openEditExpense(id, date, category, subCategory, place, amount, description) {
         document.getElementById('expense_edit_id').value = id;
         document.getElementById('expense_dialog_title').textContent = 'Edit Expense';
         document.getElementById('expense_submit_btn').textContent = 'Save Changes';
         document.getElementById('expense_date').value = date;
         document.getElementById('expense_category').value = category;
+        updateExpenseSubcategoryOptions(subCategory);
+        document.getElementById('expense_place').value = place;
         document.getElementById('expense_amount').value = amount;
         document.getElementById('expense_description').value = description;
         document.getElementById('add-expense-form').showModal();
     }
+
+    // Subcategory names are only unique within their own category, so the select's options
+    // have to be rebuilt from EXPENSE_SUBCATEGORIES whenever the chosen category changes.
+    const EXPENSE_CATEGORY_IDS = {{ expense_category_ids|tojson }};
+    const EXPENSE_SUBCATEGORIES = {{ expense_subcategories_detailed|tojson }};
+
+    function updateExpenseSubcategoryOptions(selectedName) {
+        const categoryName = document.getElementById('expense_category').value;
+        const categoryId = EXPENSE_CATEGORY_IDS[categoryName];
+        const options = EXPENSE_SUBCATEGORIES.filter((s) => s.category_id === categoryId);
+
+        const select = document.getElementById('expense_subcategory');
+        select.innerHTML = '<option value="">None (defaults to Misc)</option>';
+        options.forEach((s) => {
+            const option = document.createElement('option');
+            option.value = s.name;
+            option.textContent = s.name;
+            select.appendChild(option);
+        });
+        select.value = selectedName && options.some((s) => s.name === selectedName) ? selectedName : '';
+    }
+
+    async function addNewExpenseSubcategory() {
+        const input = document.getElementById('expense_subcategory_new_input');
+        const name = input.value.trim();
+        if (!name) {
+            input.focus();
+            return;
+        }
+        const categoryName = document.getElementById('expense_category').value;
+        const categoryId = EXPENSE_CATEGORY_IDS[categoryName];
+        if (!categoryId) {
+            alert('Pick a category first.');
+            return;
+        }
+
+        let response, data;
+        try {
+            response = await fetch('{{ url_for("add_expense_subcategory") }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'name=' + encodeURIComponent(name) + '&category_id=' + encodeURIComponent(categoryId),
+            });
+            data = await response.json();
+        } catch (err) {
+            alert('Could not reach the server. Please try again.');
+            return;
+        }
+
+        if (!response.ok) {
+            alert(data.error || 'Could not add that.');
+            return;
+        }
+
+        const alreadyExists = EXPENSE_SUBCATEGORIES.some((s) => s.category_id === categoryId && s.name === data.name);
+        if (!alreadyExists) {
+            EXPENSE_SUBCATEGORIES.push({ id: data.id, name: data.name, category_id: categoryId, count: 0 });
+        }
+        updateExpenseSubcategoryOptions(data.name);
+
+        input.value = '';
+        document.getElementById('expense_subcategory_new_row').hidden = true;
+    }
+
+    // Used by the "add subcategory" row inside each category's group in the manage-subcategories dialog.
+    async function addSubcategoryToCategory(categoryId, categoryName) {
+        const input = document.getElementById('new_subcategory_input_' + categoryId);
+        const name = input.value.trim();
+        if (!name) {
+            input.focus();
+            return;
+        }
+
+        let response, data;
+        try {
+            response = await fetch('{{ url_for("add_expense_subcategory") }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'name=' + encodeURIComponent(name) + '&category_id=' + encodeURIComponent(categoryId),
+            });
+            data = await response.json();
+        } catch (err) {
+            alert('Could not reach the server. Please try again.');
+            return;
+        }
+
+        if (!response.ok) {
+            alert(data.error || 'Could not add that.');
+            return;
+        }
+
+        // Simplest way to keep the grouped list and the add-expense select in sync.
+        window.location.reload();
+    }
+
+    // Place is a free-typed field: the list only narrows/suggests existing places, it never
+    // blocks a new one - new places register themselves in ExpensePlace when the form is submitted.
+    const EXPENSE_PLACES = {{ expense_places|tojson }};
+    let placeActiveIndex = -1;
+
+    function filterPlaceOptions() {
+        const input = document.getElementById('expense_place');
+        const query = input.value.trim().toLowerCase();
+        const list = document.getElementById('expense_place_options');
+        const matches = query
+            ? EXPENSE_PLACES
+                .filter((p) => p.toLowerCase().includes(query))
+                .sort((a, b) => {
+                    const aStarts = a.toLowerCase().startsWith(query) ? 0 : 1;
+                    const bStarts = b.toLowerCase().startsWith(query) ? 0 : 1;
+                    return aStarts - bStarts || a.localeCompare(b);
+                })
+            : EXPENSE_PLACES.slice().sort();
+
+        list.innerHTML = '';
+        placeActiveIndex = -1;
+
+        if (matches.length === 0) {
+            list.hidden = true;
+            return;
+        }
+
+        matches.slice(0, 8).forEach((name) => {
+            const item = document.createElement('div');
+            item.className = 'combobox-option';
+            item.textContent = name;
+            item.onmousedown = (event) => {
+                event.preventDefault();
+                selectPlaceOption(name);
+            };
+            list.appendChild(item);
+        });
+        list.hidden = false;
+    }
+
+    function selectPlaceOption(name) {
+        document.getElementById('expense_place').value = name;
+        hidePlaceOptions();
+    }
+
+    function hidePlaceOptions() {
+        document.getElementById('expense_place_options').hidden = true;
+        placeActiveIndex = -1;
+    }
+
+    function handlePlaceKeydown(event) {
+        const list = document.getElementById('expense_place_options');
+        if (list.hidden) return;
+        const items = list.querySelectorAll('.combobox-option');
+
+        if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            placeActiveIndex = Math.min(placeActiveIndex + 1, items.length - 1);
+            highlightPlaceOption(items);
+        } else if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            placeActiveIndex = Math.max(placeActiveIndex - 1, 0);
+            highlightPlaceOption(items);
+        } else if (event.key === 'Enter') {
+            if (placeActiveIndex >= 0 && items[placeActiveIndex]) {
+                event.preventDefault();
+                selectPlaceOption(items[placeActiveIndex].textContent);
+            } else {
+                hidePlaceOptions();
+            }
+        } else if (event.key === 'Escape') {
+            hidePlaceOptions();
+        }
+    }
+
+    function highlightPlaceOption(items) {
+        items.forEach((item, index) => item.classList.toggle('active', index === placeActiveIndex));
+        if (items[placeActiveIndex]) {
+            items[placeActiveIndex].scrollIntoView({ block: 'nearest' });
+        }
+    }
+
+    document.addEventListener('click', (event) => {
+        const combobox = document.getElementById('expense_place').closest('.combobox');
+        if (!combobox.contains(event.target)) {
+            hidePlaceOptions();
+        }
+    });
+
+    // Shared floating tooltip for SVG chart marks - CSS ::after on a data-tooltip
+    // attribute doesn't render on SVG shapes in most browsers, and the bar chart's
+    // container is now horizontally scrollable (overflow-x:auto forces overflow-y into
+    // a clipping context too, which would cut off a CSS ::after popup on a tall bar) -
+    // so both donut segments and P&L bars get a small JS-positioned tooltip instead.
+    (function () {
+        let tooltip;
+
+        function ensureTooltip() {
+            if (!tooltip) {
+                tooltip = document.createElement('div');
+                tooltip.className = 'chart-tooltip';
+                tooltip.hidden = true;
+                document.body.appendChild(tooltip);
+            }
+            return tooltip;
+        }
+
+        function showTooltip(target) {
+            const el = ensureTooltip();
+            el.textContent = target.getAttribute('data-tooltip');
+            const rect = target.getBoundingClientRect();
+            el.style.left = (rect.left + rect.width / 2) + 'px';
+            el.style.top = rect.top + 'px';
+            el.hidden = false;
+        }
+
+        function hideTooltip() {
+            if (tooltip) {
+                tooltip.hidden = true;
+            }
+        }
+
+        document.querySelectorAll('.donut-segment[data-tooltip], .bar[data-tooltip], .net-worth-point[data-tooltip]').forEach((mark) => {
+            mark.addEventListener('pointerenter', () => showTooltip(mark));
+            mark.addEventListener('pointerleave', hideTooltip);
+            mark.addEventListener('focus', () => showTooltip(mark));
+            mark.addEventListener('blur', hideTooltip);
+        });
+
+        // Scrolling the bar chart horizontally moves bars out from under a stationary
+        // pointer without firing pointerleave, which would otherwise strand the tooltip.
+        const chartBars = document.querySelector('.chart-bars');
+        if (chartBars) {
+            chartBars.addEventListener('scroll', hideTooltip);
+        }
+    })();
 </script>
 {% endblock %}
