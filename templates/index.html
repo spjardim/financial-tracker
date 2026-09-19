@@ -203,8 +203,8 @@
                     </form>
                     <span class="manage-usage-count">{{ account_type_labels[acc.account_type] }}</span>
                     <form method="post" action="{{ url_for('delete_account', account_id=acc.id) }}"
-                          onsubmit="return confirm('Delete account {{ acc.name }}?');">
-                        <button type="submit" class="btn-danger" {% if acc.has_balances %}disabled title="Has recorded balances"{% endif %}>Delete</button>
+                          onsubmit='return confirm({{ ("Delete account " ~ acc.name ~ "?" ~ (" This also deletes its " ~ acc.balance_count ~ " recorded balance(s) and changes your net worth history." if acc.balance_count else ""))|tojson }});'>
+                        <button type="submit" class="btn-danger">Delete</button>
                     </form>
                 </div>
             {% else %}
@@ -416,7 +416,7 @@
                         </form>
                         <span class="manage-usage-count">{{ row.count }} {{ 'entry' if row.count == 1 else 'entries' }}</span>
                         <form method="post" action="{{ url_for('delete_income_source', source_id=row.id) }}"
-                              onsubmit="return confirm('Delete source {{ row.name }}?');">
+                              onsubmit='return confirm({{ ("Delete source " ~ row.name ~ "?")|tojson }});'>
                             <button type="submit" class="btn-danger" {% if row.count > 0 %}disabled title="In use - rename instead of deleting"{% endif %}>Delete</button>
                         </form>
                     </div>
@@ -534,7 +534,7 @@
                         </form>
                         <span class="manage-usage-count">{{ row.count }} {{ 'entry' if row.count == 1 else 'entries' }}</span>
                         <form method="post" action="{{ url_for('delete_expense_category', category_id=row.id) }}"
-                              onsubmit="return confirm('Delete category {{ row.name }}?');">
+                              onsubmit='return confirm({{ ("Delete category " ~ row.name ~ "?")|tojson }});'>
                             <button type="submit" class="btn-danger" {% if row.count > 0 %}disabled title="In use - rename instead of deleting"{% endif %}>Delete</button>
                         </form>
                     </div>
@@ -558,7 +558,7 @@
                                 </form>
                                 <span class="manage-usage-count">{{ row.count }} {{ 'entry' if row.count == 1 else 'entries' }}</span>
                                 <form method="post" action="{{ url_for('delete_expense_subcategory', subcategory_id=row.id) }}"
-                                      onsubmit="return confirm('Delete subcategory {{ row.name }}?');">
+                                      onsubmit='return confirm({{ ("Delete subcategory " ~ row.name ~ "?")|tojson }});'>
                                     <button type="submit" class="btn-danger" {% if row.count > 0 %}disabled title="In use - rename instead of deleting"{% endif %}>Delete</button>
                                 </form>
                             </div>
@@ -587,7 +587,7 @@
                         </form>
                         <span class="manage-usage-count">{{ row.count }} {{ 'entry' if row.count == 1 else 'entries' }}</span>
                         <form method="post" action="{{ url_for('delete_expense_place', place_id=row.id) }}"
-                              onsubmit="return confirm('Delete place {{ row.name }}?');">
+                              onsubmit='return confirm({{ ("Delete place " ~ row.name ~ "?")|tojson }});'>
                             <button type="submit" class="btn-danger" {% if row.count > 0 %}disabled title="In use - rename instead of deleting"{% endif %}>Delete</button>
                         </form>
                     </div>

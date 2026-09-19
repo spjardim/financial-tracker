@@ -435,15 +435,17 @@ def index():
             (net_worth['current_net_worth'] - net_worth['prev_net_worth']) / abs(net_worth['prev_net_worth']) * 100
         )
     latest_balance_by_account = {}
+    balance_count_by_account = {}
     for b in AccountBalance.query.order_by(AccountBalance.date).all():
         latest_balance_by_account[b.account_id] = b.balance
+        balance_count_by_account[b.account_id] = balance_count_by_account.get(b.account_id, 0) + 1
     accounts_detailed = [
         {
             'id': a.id,
             'name': a.name,
             'account_type': a.account_type,
             'latest_balance': latest_balance_by_account.get(a.id),
-            'has_balances': a.id in latest_balance_by_account,
+            'balance_count': balance_count_by_account.get(a.id, 0),
         }
         for a in Account.query.order_by(Account.name).all()
     ]
@@ -947,13 +949,10 @@ def rename_account(account_id):
 @app.route('/delete_account/<int:account_id>', methods=['POST'])
 def delete_account(account_id):
     account = Account.query.get_or_404(account_id)
-    if AccountBalance.query.filter_by(account_id=account.id).first() is not None:
-        flash(f'"{account.name}" has recorded balances, so it can\'t be deleted.')
-        return redirect(url_for('index'))
-
+    removed = AccountBalance.query.filter_by(account_id=account.id).delete()
     expense_tracker.session.delete(account)
     expense_tracker.session.commit()
-    flash(f'Deleted account "{account.name}".')
+    flash(f'Deleted account "{account.name}"' + (f' and its {removed} recorded balance(s).' if removed else '.'))
     return redirect(url_for('index'))
 
 
