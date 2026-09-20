@@ -206,6 +206,37 @@
             font-size: 12px;
             color: var(--text-muted);
         }
+        .history-list {
+            max-height: 55vh;
+            overflow-y: auto;
+            margin: 12px 0 16px;
+            padding-right: 4px;
+        }
+        .history-month {
+            border-bottom: 1px solid var(--border-hairline);
+            padding: 8px 0;
+        }
+        .history-month summary {
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            font-size: 14px;
+        }
+        .history-net.positive { color: var(--color-good); }
+        .history-net.negative { color: var(--text-negative); }
+        .history-type {
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+        .history-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .history-actions button {
+            margin: 0;
+        }
         .manage-group-add select {
             width: auto;
         }

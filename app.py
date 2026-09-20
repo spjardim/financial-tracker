@@ -256,6 +256,38 @@ def _build_all_years_chart():
     return _chart_from_series(labels, yearly_income, yearly_expenses)
 
 
+def _parse_month(value):
+    """'2026-03' (from <input type="month">) -> first of that month, or None if invalid."""
+    try:
+        year, month = (int(part) for part in (value or '').split('-'))
+        return datetime.datetime(year, month, 1)
+    except ValueError:
+        return None
+
+
+def _balance_history():
+    """Every recorded month, newest first, with each account's balance - for the edit-history dialog."""
+    accounts_by_id = {a.id: a for a in Account.query.all()}
+    type_order = {t: i for i, t in enumerate(ACCOUNT_TYPES)}
+    by_month = {}
+    for b in AccountBalance.query.all():
+        by_month.setdefault(b.date, []).append(b)
+
+    history = []
+    for month in sorted(by_month, reverse=True):
+        entries = []
+        net = 0.0
+        for b in by_month[month]:
+            account = accounts_by_id[b.account_id]
+            net += -b.balance if account.account_type == 'liability' else b.balance
+            entries.append({'account_id': account.id, 'name': account.name,
+                            'account_type': account.account_type, 'balance': b.balance})
+        entries.sort(key=lambda e: (type_order[e['account_type']], e['name']))
+        history.append({'value': month.strftime('%Y-%m'), 'label': month.strftime('%B %Y'),
+                        'net': net, 'entries': entries})
+    return history
+
+
 def _nice_floor(value):
     """Round down to a clean negative axis min - the mirror of _nice_ceil for the
     below-zero side, since net worth (unlike income/expenses) can go negative."""
@@ -542,6 +574,7 @@ def index():
         net_worth=net_worth,
         net_worth_delta_pct=net_worth_delta_pct,
         accounts_detailed=accounts_detailed,
+        balance_history=_balance_history(),
         account_type_labels=ACCOUNT_TYPE_LABELS,
         current_month_value=now.strftime('%Y-%m'),
         donut_radius=DONUT_RADIUS,
@@ -976,12 +1009,50 @@ def delete_account(account_id):
     return redirect(url_for('index'))
 
 
+@app.route('/update_month_balances', methods=['POST'])
+def update_month_balances():
+    """Edit a recorded month in place: a changed number updates that balance, a blank one removes it."""
+    month_date = _parse_month(request.form.get('month'))
+    if month_date is None:
+        flash('Pick a valid month.')
+        return redirect(url_for('index'))
+
+    for row in AccountBalance.query.filter_by(date=month_date).all():
+        raw = request.form.get(f'balance_{row.account_id}')
+        if raw is None:
+            continue
+        raw = raw.strip()
+        if not raw:
+            expense_tracker.session.delete(row)
+            continue
+        try:
+            row.balance = float(raw)
+        except ValueError:
+            flash('Balances must be numbers.')
+            return redirect(url_for('index'))
+
+    expense_tracker.session.commit()
+    flash(f'Updated balances for {month_date.strftime("%B %Y")}.')
+    return redirect(url_for('index'))
+
+
+@app.route('/delete_month_balances', methods=['POST'])
+def delete_month_balances():
+    month_date = _parse_month(request.form.get('month'))
+    if month_date is None:
+        flash('Pick a valid month.')
+        return redirect(url_for('index'))
+
+    removed = AccountBalance.query.filter_by(date=month_date).delete()
+    expense_tracker.session.commit()
+    flash(f'Deleted {removed} balance(s) for {month_date.strftime("%B %Y")}.')
+    return redirect(url_for('index'))
+
+
 @app.route('/save_balances', methods=['POST'])
 def save_balances():
-    try:
-        year, month = (int(part) for part in (request.form.get('month') or '').split('-'))
-        month_date = datetime.datetime(year, month, 1)
-    except ValueError:
+    month_date = _parse_month(request.form.get('month'))
+    if month_date is None:
         flash('Pick a valid month.')
         return redirect(url_for('index'))
 

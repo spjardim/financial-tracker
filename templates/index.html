@@ -106,6 +106,9 @@
             <h2>Net Worth</h2>
             <div class="net-worth-actions">
                 <button type="button" class="add-btn" onclick="document.getElementById('update-balances-form').showModal()">Update Balances</button>
+                {% if balance_history %}
+                    <button type="button" onclick="document.getElementById('balance-history').showModal()">Edit History</button>
+                {% endif %}
                 <button type="button" class="icon-btn" title="Manage accounts" onclick="document.getElementById('manage-accounts').showModal()">&#9881;</button>
             </div>
         </div>
@@ -190,6 +193,32 @@
             {% endif %}
             <button type="button" onclick="document.getElementById('update-balances-form').close()">Cancel</button>
         </form>
+    </dialog>
+
+    <dialog id="balance-history" class="dialog-wide">
+        <h2>Balance History</h2>
+        <p class="empty-state">Change a number and save, clear one to remove it, or delete the whole month. To add an account to a past month, use Update Balances and pick that month.</p>
+        <div class="history-list">
+            {% for month in balance_history %}
+                <details class="history-month">
+                    <summary>{{ month.label }} <span class="history-net {{ 'positive' if month.net >= 0 else 'negative' }}">{{ month.net|money }}</span></summary>
+                    <form method="post" action="{{ url_for('update_month_balances') }}">
+                        <input type="hidden" name="month" value="{{ month.value }}">
+                        {% for entry in month.entries %}
+                            <label for="hist_{{ month.value }}_{{ entry.account_id }}">{{ entry.name }} <span class="history-type">({{ account_type_labels[entry.account_type] }})</span></label>
+                            <input type="number" step="0.01" id="hist_{{ month.value }}_{{ entry.account_id }}"
+                                   name="balance_{{ entry.account_id }}" value="{{ entry.balance }}">
+                        {% endfor %}
+                        <div class="history-actions">
+                            <button type="submit">Save</button>
+                            <button type="submit" class="btn-danger" formaction="{{ url_for('delete_month_balances') }}" formnovalidate
+                                    onclick='return confirm({{ ("Delete all balances for " ~ month.label ~ "? This changes your net worth history.")|tojson }});'>Delete month</button>
+                        </div>
+                    </form>
+                </details>
+            {% endfor %}
+        </div>
+        <button type="button" onclick="document.getElementById('balance-history').close()">Close</button>
     </dialog>
 
     <dialog id="manage-accounts" class="dialog-wide">
