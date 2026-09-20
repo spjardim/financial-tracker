@@ -358,6 +358,23 @@ def _place_totals(expenses):
     return totals
 
 
+def _subcategory_breakdowns(expenses):
+    """Per-category subcategory totals for the drill-down pie. A category is only drillable
+    if it has something besides the 'Misc' default - otherwise the drill-down is one slice."""
+    totals_by_category = {}
+    for e in expenses:
+        subs = totals_by_category.setdefault(e.category, {})
+        label = e.sub_category or 'Misc'
+        subs[label] = subs.get(label, 0.0) + e.amount
+
+    breakdowns = {}
+    for category, subs in totals_by_category.items():
+        rows, total = _breakdown_rows(subs)
+        if any(r['label'] != 'Misc' for r in rows):
+            breakdowns[category] = {'rows': rows, 'total': total}
+    return breakdowns, sorted(breakdowns)
+
+
 def _avg_hourly_rate(incomes):
     """Weighted average $/hr across 'tips' entries - the only entries that track hours."""
     tip_incomes = [i for i in incomes if i.entry_type == 'tips' and (i.scheduled_hours + i.extra_hours) > 0]
@@ -408,6 +425,7 @@ def index():
     expense_rows, total_expenses = _breakdown_rows(_category_totals(expenses))
     income_rows, total_income = _breakdown_rows(_source_totals(incomes))
     place_rows, _ = _breakdown_rows(_place_totals(expenses))
+    subcategory_breakdowns, drillable_categories = _subcategory_breakdowns(expenses)
 
     net_savings = total_income - total_expenses
     savings_rate = (net_savings / total_income * 100) if total_income else None
@@ -512,6 +530,8 @@ def index():
         expense_rows=expense_rows,
         income_rows=income_rows,
         place_rows=place_rows,
+        subcategory_breakdowns=subcategory_breakdowns,
+        drillable_categories=drillable_categories,
         total_expenses=total_expenses,
         total_income=total_income,
         net_savings=net_savings,

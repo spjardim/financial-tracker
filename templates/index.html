@@ -224,128 +224,81 @@
         <button type="button" onclick="document.getElementById('manage-accounts').close()">Close</button>
     </dialog>
 
-    <div class="card breakdown-card" style="margin-top: 20px;">
-        <div class="breakdown-section">
-            <h2>Expenses by Category</h2>
-            <div class="breakdown-total">Total: ${{ '{:,.2f}'.format(total_expenses) }}{% if expense_rows %} across {{ expense_rows|length }} categor{{ 'y' if expense_rows|length == 1 else 'ies' }}{% endif %}</div>
-            <div class="breakdown-chart-row">
-                {% if expense_rows %}
-                    <svg class="donut-chart" viewBox="0 0 200 200" width="160" height="160" role="img" aria-label="Expenses by category">
-                        <g transform="rotate(-90 100 100)">
-                            {% for row in expense_rows %}
-                                <circle class="donut-segment" cx="100" cy="100" r="{{ donut_radius }}" fill="none"
-                                        stroke="{{ row.color }}" stroke-width="26"
-                                        stroke-dasharray="{{ row.dash_array }}" stroke-dashoffset="{{ row.dash_offset }}"
-                                        tabindex="0"
-                                        data-tooltip="{{ row.label }}: ${{ '{:,.2f}'.format(row.amount) }} ({{ '%.0f'|format(row.pct_of_total) }}%)"></circle>
-                            {% endfor %}
-                        </g>
-                        <text x="100" y="94" text-anchor="middle" class="donut-center-label">Total</text>
-                        <text x="100" y="118" text-anchor="middle" class="donut-center-value">${{ '{:,.0f}'.format(total_expenses) }}</text>
-                    </svg>
-                {% endif %}
-                <div class="breakdown-list">
-                    {% for row in expense_rows %}
-                        <div class="breakdown-row">
-                            <div class="breakdown-row-label" title="{{ row.label }}">
-                                <span class="breakdown-swatch" style="background: {{ row.color }};"></span>
-                                <span class="breakdown-row-label-text">{{ row.label }}</span>
-                            </div>
-                            <div class="breakdown-bar-track">
-                                <div class="breakdown-bar-fill expense" style="width: {{ row.bar_pct }}%;"></div>
-                            </div>
-                            <div class="breakdown-row-value">
-                                <strong>${{ '{:,.2f}'.format(row.amount) }}</strong>
-                                {{ '%.0f'|format(row.pct_of_total) }}%
-                            </div>
+    {% macro breakdown_body(rows, total, bar_class, aria_label, empty_text, drill_keys=[]) %}
+        <div class="breakdown-chart-row">
+            {% if rows %}
+                <svg class="donut-chart" viewBox="0 0 200 200" width="160" height="160" role="img" aria-label="{{ aria_label }}">
+                    <g transform="rotate(-90 100 100)">
+                        {% for row in rows %}
+                            {% set drillable = row.label in drill_keys %}
+                            <circle class="donut-segment" cx="100" cy="100" r="{{ donut_radius }}" fill="none"
+                                    stroke="{{ row.color }}" stroke-width="26"
+                                    stroke-dasharray="{{ row.dash_array }}" stroke-dashoffset="{{ row.dash_offset }}"
+                                    tabindex="0"
+                                    {% if drillable %}data-drill="{{ row.label }}" role="button"{% endif %}
+                                    data-tooltip="{{ row.label }}: ${{ '{:,.2f}'.format(row.amount) }} ({{ '%.0f'|format(row.pct_of_total) }}%){{ ' - click for subcategories' if drillable else '' }}"></circle>
+                        {% endfor %}
+                    </g>
+                    <text x="100" y="94" text-anchor="middle" class="donut-center-label">Total</text>
+                    <text x="100" y="118" text-anchor="middle" class="donut-center-value">${{ '{:,.0f}'.format(total) }}</text>
+                </svg>
+            {% endif %}
+            <div class="breakdown-list">
+                {% for row in rows %}
+                    {% set drillable = row.label in drill_keys %}
+                    <div class="breakdown-row{{ ' drillable' if drillable else '' }}"
+                         {% if drillable %}data-drill="{{ row.label }}" role="button" tabindex="0" title="Show {{ row.label }} subcategories"{% endif %}>
+                        <div class="breakdown-row-label" title="{{ row.label }}">
+                            <span class="breakdown-swatch" style="background: {{ row.color }};"></span>
+                            <span class="breakdown-row-label-text">{{ row.label }}</span>
+                            {% if drillable %}<span class="drill-hint" aria-hidden="true">&rsaquo;</span>{% endif %}
                         </div>
-                    {% else %}
-                        <p class="breakdown-empty">No expenses recorded {{ 'this year' if view == 'monthly' else 'yet' }}.</p>
-                    {% endfor %}
-                </div>
+                        <div class="breakdown-bar-track">
+                            <div class="breakdown-bar-fill {{ bar_class }}" style="width: {{ row.bar_pct }}%;"></div>
+                        </div>
+                        <div class="breakdown-row-value">
+                            <strong>${{ '{:,.2f}'.format(row.amount) }}</strong>
+                            {{ '%.0f'|format(row.pct_of_total) }}%
+                        </div>
+                    </div>
+                {% else %}
+                    <p class="breakdown-empty">{{ empty_text }}</p>
+                {% endfor %}
             </div>
+        </div>
+    {% endmacro %}
+
+    <div class="card breakdown-card" style="margin-top: 20px;">
+        <div class="breakdown-section" id="category-breakdown">
+            <div class="breakdown-view">
+                <h2>Expenses by Category</h2>
+                <div class="breakdown-total">Total: ${{ '{:,.2f}'.format(total_expenses) }}{% if expense_rows %} across {{ expense_rows|length }} categor{{ 'y' if expense_rows|length == 1 else 'ies' }}{% endif %}</div>
+                {{ breakdown_body(expense_rows, total_expenses, 'expense', 'Expenses by category',
+                                  'No expenses recorded ' ~ ('this year' if view == 'monthly' else 'yet') ~ '.', drillable_categories) }}
+            </div>
+            {% for category in drillable_categories %}
+                {% set sub = subcategory_breakdowns[category] %}
+                <div class="breakdown-view" data-category="{{ category }}" hidden>
+                    <button type="button" class="breakdown-back" onclick="showCategoryBreakdown()">&lsaquo; All categories</button>
+                    <h2>{{ category }} by Subcategory</h2>
+                    <div class="breakdown-total">Total: ${{ '{:,.2f}'.format(sub.total) }} across {{ sub.rows|length }} subcategor{{ 'y' if sub.rows|length == 1 else 'ies' }}</div>
+                    {{ breakdown_body(sub.rows, sub.total, 'expense', category ~ ' by subcategory', '') }}
+                </div>
+            {% endfor %}
         </div>
 
         <div class="breakdown-section">
             <h2>Expenses by Place</h2>
             <div class="breakdown-total">Total: ${{ '{:,.2f}'.format(total_expenses) }}{% if place_rows %} across {{ place_rows|length }} place{{ 's' if place_rows|length != 1 else '' }}{% endif %}</div>
-            <div class="breakdown-chart-row">
-                {% if place_rows %}
-                    <svg class="donut-chart" viewBox="0 0 200 200" width="160" height="160" role="img" aria-label="Expenses by place">
-                        <g transform="rotate(-90 100 100)">
-                            {% for row in place_rows %}
-                                <circle class="donut-segment" cx="100" cy="100" r="{{ donut_radius }}" fill="none"
-                                        stroke="{{ row.color }}" stroke-width="26"
-                                        stroke-dasharray="{{ row.dash_array }}" stroke-dashoffset="{{ row.dash_offset }}"
-                                        tabindex="0"
-                                        data-tooltip="{{ row.label }}: ${{ '{:,.2f}'.format(row.amount) }} ({{ '%.0f'|format(row.pct_of_total) }}%)"></circle>
-                            {% endfor %}
-                        </g>
-                        <text x="100" y="94" text-anchor="middle" class="donut-center-label">Total</text>
-                        <text x="100" y="118" text-anchor="middle" class="donut-center-value">${{ '{:,.0f}'.format(total_expenses) }}</text>
-                    </svg>
-                {% endif %}
-                <div class="breakdown-list">
-                    {% for row in place_rows %}
-                        <div class="breakdown-row">
-                            <div class="breakdown-row-label" title="{{ row.label }}">
-                                <span class="breakdown-swatch" style="background: {{ row.color }};"></span>
-                                <span class="breakdown-row-label-text">{{ row.label }}</span>
-                            </div>
-                            <div class="breakdown-bar-track">
-                                <div class="breakdown-bar-fill expense" style="width: {{ row.bar_pct }}%;"></div>
-                            </div>
-                            <div class="breakdown-row-value">
-                                <strong>${{ '{:,.2f}'.format(row.amount) }}</strong>
-                                {{ '%.0f'|format(row.pct_of_total) }}%
-                            </div>
-                        </div>
-                    {% else %}
-                        <p class="breakdown-empty">No expenses recorded {{ 'this year' if view == 'monthly' else 'yet' }}.</p>
-                    {% endfor %}
-                </div>
-            </div>
+            {{ breakdown_body(place_rows, total_expenses, 'expense', 'Expenses by place',
+                              'No expenses recorded ' ~ ('this year' if view == 'monthly' else 'yet') ~ '.') }}
         </div>
 
         <div class="breakdown-section">
             <h2>Income by Source</h2>
             <div class="breakdown-total">Total: ${{ '{:,.2f}'.format(total_income) }}{% if income_rows %} across {{ income_rows|length }} source{{ 's' if income_rows|length != 1 else '' }}{% endif %}</div>
-            <div class="breakdown-chart-row">
-                {% if income_rows %}
-                    <svg class="donut-chart" viewBox="0 0 200 200" width="160" height="160" role="img" aria-label="Income by source">
-                        <g transform="rotate(-90 100 100)">
-                            {% for row in income_rows %}
-                                <circle class="donut-segment" cx="100" cy="100" r="{{ donut_radius }}" fill="none"
-                                        stroke="{{ row.color }}" stroke-width="26"
-                                        stroke-dasharray="{{ row.dash_array }}" stroke-dashoffset="{{ row.dash_offset }}"
-                                        tabindex="0"
-                                        data-tooltip="{{ row.label }}: ${{ '{:,.2f}'.format(row.amount) }} ({{ '%.0f'|format(row.pct_of_total) }}%)"></circle>
-                            {% endfor %}
-                        </g>
-                        <text x="100" y="94" text-anchor="middle" class="donut-center-label">Total</text>
-                        <text x="100" y="118" text-anchor="middle" class="donut-center-value">${{ '{:,.0f}'.format(total_income) }}</text>
-                    </svg>
-                {% endif %}
-                <div class="breakdown-list">
-                    {% for row in income_rows %}
-                        <div class="breakdown-row">
-                            <div class="breakdown-row-label" title="{{ row.label }}">
-                                <span class="breakdown-swatch" style="background: {{ row.color }};"></span>
-                                <span class="breakdown-row-label-text">{{ row.label }}</span>
-                            </div>
-                            <div class="breakdown-bar-track">
-                                <div class="breakdown-bar-fill income" style="width: {{ row.bar_pct }}%;"></div>
-                            </div>
-                            <div class="breakdown-row-value">
-                                <strong>${{ '{:,.2f}'.format(row.amount) }}</strong>
-                                {{ '%.0f'|format(row.pct_of_total) }}%
-                            </div>
-                        </div>
-                    {% else %}
-                        <p class="breakdown-empty">No income recorded {{ 'this year' if view == 'monthly' else 'yet' }}.</p>
-                    {% endfor %}
-                </div>
-            </div>
+            {{ breakdown_body(income_rows, total_income, 'income', 'Income by source',
+                              'No income recorded ' ~ ('this year' if view == 'monthly' else 'yet') ~ '.') }}
         </div>
     </div>
     <div class="income-and-expenses">
@@ -867,6 +820,27 @@
         const combobox = document.getElementById('expense_place').closest('.combobox');
         if (!combobox.contains(event.target)) {
             hidePlaceOptions();
+        }
+    });
+
+    // Clicking a category slice/row swaps the category pie for that category's subcategory pie.
+    function showCategoryBreakdown(category) {
+        document.querySelectorAll('#category-breakdown .breakdown-view').forEach((view) => {
+            view.hidden = category ? view.dataset.category !== category : view.dataset.category !== undefined;
+        });
+        document.querySelectorAll('.chart-tooltip').forEach((tip) => { tip.hidden = true; });
+    }
+
+    document.addEventListener('click', (event) => {
+        const target = event.target.closest('[data-drill]');
+        if (target) showCategoryBreakdown(target.dataset.drill);
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        const target = event.target.closest && event.target.closest('[data-drill]');
+        if (target) {
+            event.preventDefault();
+            showCategoryBreakdown(target.dataset.drill);
         }
     });
 
