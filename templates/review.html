@@ -1,0 +1,186 @@
+{% extends 'base.html' %}
+{% block title %}Review &middot; Finances{% endblock %}
+{% block content %}
+    <div class="card" style="margin-top: 20px;">
+        <div class="review-header">
+            <h2>To Review ({{ rows|length }})</h2>
+            <div class="review-header-actions">
+                <form method="post" action="{{ url_for('plaid_sync_now') }}">
+                    <input type="hidden" name="next" value="{{ url_for('review') }}">
+                    <button type="submit">Sync Banks</button>
+                </form>
+                {% if ready_count %}
+                    <form method="post" action="{{ url_for('review_approve_all') }}"
+                          onsubmit='return confirm({{ ("File " ~ ready_count ~ " transaction(s) as suggested? Tips, paybacks and anything Plaid isn't sure about are left for you.")|tojson }});'>
+                        <button type="submit" class="add-btn">Approve {{ ready_count }} Suggested</button>
+                    </form>
+                {% endif %}
+            </div>
+        </div>
+        <p class="empty-state">Money going out is an expense or ignored. Money coming in is income, pays back an earlier expense, or is ignored. Transfers between your own accounts and card payments should be ignored.</p>
+
+        {% for row in rows %}
+            {% set line = row.line %}
+            {% set s = row.suggestion %}
+            {% set money_out = line.amount > 0 %}
+            <form class="review-row" id="line-{{ line.id }}" method="post" action="{{ url_for('review_file', line_id=line.id) }}"
+                  data-suggested-expense="{{ s.expense_id or '' }}">
+                <div class="review-line">
+                    <div>
+                        <strong>{{ line.merchant_name or line.description or 'Unknown' }}</strong>
+                        <div class="entry-meta">
+                            {{ line.date.strftime('%b %d, %Y') }} &middot; {{ row.account }}
+                            {% if line.merchant_name and line.description %} &middot; {{ line.description }}{% endif %}
+                        </div>
+                    </div>
+                    <div class="entry-amount {{ 'negative' if money_out else 'positive' }}">
+                        {{ '-' if money_out else '+' }}${{ '{:,.2f}'.format(line.amount|abs) }}
+                    </div>
+                </div>
+                <div class="review-fields">
+                    <select name="action" aria-label="What is this?">
+                        {% if money_out %}
+                            <option value="expense" {{ 'selected' if s.action == 'expense' }}>Expense</option>
+                        {% else %}
+                            <option value="income" {{ 'selected' if s.action == 'income' }}>Income</option>
+                            <option value="payback" {{ 'selected' if s.action == 'payback' }}>Pays back an expense</option>
+                        {% endif %}
+                        <option value="ignore" {{ 'selected' if s.action == 'ignore' }}>Ignore</option>
+                    </select>
+
+                    {% if money_out %}
+                        <span class="review-group" data-for="expense">
+                            <input name="category" list="review-categories" placeholder="Category" required
+                                   value="{{ s.category or '' }}" aria-label="Category">
+                            <input name="sub_category" list="review-subcategories" placeholder="Subcategory"
+                                   value="{{ s.sub_category if s.sub_category and s.sub_category != 'Misc' else '' }}" aria-label="Subcategory">
+                            <input name="place" list="review-places" placeholder="Place" value="{{ s.place or '' }}" aria-label="Place">
+                        </span>
+                    {% else %}
+                        <span class="review-group" data-for="income">
+                            <input name="income_source" list="review-sources" placeholder="Source" required
+                                   value="{{ s.income_source or '' }}" aria-label="Income source">
+                            <select name="income_type" aria-label="Income type">
+                                {% for entry_type in income_entry_types %}
+                                    <option value="{{ entry_type }}" {{ 'selected' if entry_type == (s.income_type or 'tips') }}>{{ income_entry_type_labels[entry_type] }}</option>
+                                {% endfor %}
+                            </select>
+                            <input type="number" name="amount" step="0.01" min="0.01" value="{{ '%.2f'|format(-line.amount) }}"
+                                   title="Raise it to include cash from the same shift" aria-label="Amount">
+                            <span class="review-hours">
+                                <select name="shift" aria-label="Shift">
+                                    <option value="">Shift</option>
+                                    {% for shift in income_shifts %}
+                                        <option value="{{ shift }}">{{ shift|capitalize }}</option>
+                                    {% endfor %}
+                                </select>
+                                <input type="number" name="scheduled_hours" step="0.01" min="0" placeholder="Sched. hrs" required aria-label="Scheduled hours">
+                                <input type="number" name="extra_hours" step="0.01" min="0" placeholder="Extra hrs" aria-label="Extra hours">
+                            </span>
+                        </span>
+                        <span class="review-group" data-for="payback">
+                            <input class="payback-filter" placeholder="Search expenses" aria-label="Search expenses">
+                            <select name="expense_id" required aria-label="Expense this pays back"></select>
+                        </span>
+                    {% endif %}
+
+                    {% if s.basis == 'rule' %}
+                        <span class="review-hint" title="Based on how you filed this merchant last time">remembered</span>
+                    {% elif s.basis == 'unsure' %}
+                        <span class="review-hint unsure">Plaid isn't sure - check this one</span>
+                    {% endif %}
+                    <button type="submit">File</button>
+                </div>
+            </form>
+        {% else %}
+            <p class="empty-state">All caught up. New bank activity shows up here after each sync.</p>
+        {% endfor %}
+    </div>
+
+    {% if recent %}
+        <div class="card review-recent" style="margin-top: 20px;">
+            <h2>Recently Reviewed</h2>
+            {% for item in recent %}
+                {% set money_out = item.line.amount > 0 %}
+                <div class="entry-row">
+                    <div>
+                        <strong>{{ item.line.merchant_name or item.line.description }}</strong>
+                        <div class="entry-meta">{{ item.line.date.strftime('%b %d, %Y') }} &middot; {{ item.account }} &middot; {{ item.outcome }}</div>
+                    </div>
+                    <div class="entry-trailing">
+                        <div class="entry-amount {{ 'negative' if money_out else 'positive' }}">{{ '-' if money_out else '+' }}${{ '{:,.2f}'.format(item.line.amount|abs) }}</div>
+                        <div class="entry-actions">
+                            <form method="post" action="{{ url_for('review_undo', line_id=item.line.id) }}" class="row-action-form">
+                                <button type="submit" class="row-action" title="Undo - move back to To Review" aria-label="Undo">&#8630;</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+
+    <datalist id="review-categories">
+        {% for name in category_names %}<option value="{{ name }}"></option>{% endfor %}
+    </datalist>
+    <datalist id="review-subcategories"></datalist>
+    <datalist id="review-places">
+        {% for name in place_names %}<option value="{{ name }}"></option>{% endfor %}
+    </datalist>
+    <datalist id="review-sources">
+        {% for name in source_names %}<option value="{{ name }}"></option>{% endfor %}
+    </datalist>
+{% endblock %}
+{% block scripts %}
+<script>
+    const SUBCATEGORIES = {{ subcategories_by_category|tojson }};
+    const EXPENSE_CHOICES = {{ expense_choices|tojson }};
+
+    // Inputs in hidden groups are disabled so they're neither submitted nor validated.
+    function setGroupEnabled(group, enabled) {
+        group.hidden = !enabled;
+        group.querySelectorAll('input, select').forEach((el) => { el.disabled = !enabled; });
+    }
+
+    function syncHours(form) {
+        const hours = form.querySelector('.review-hours');
+        if (!hours) return;
+        const type = form.querySelector('[name="income_type"]');
+        setGroupEnabled(hours, !type.disabled && type.value === 'tips');
+    }
+
+    function fillPaybackChoices(form) {
+        const select = form.querySelector('[name="expense_id"]');
+        const query = form.querySelector('.payback-filter').value.trim().toLowerCase();
+        const keep = select.value || form.dataset.suggestedExpense;
+        select.innerHTML = '';
+        select.add(new Option(EXPENSE_CHOICES.length ? 'Pick the expense this pays back…' : 'No unpaid expenses in the last year', ''));
+        EXPENSE_CHOICES
+            .filter((choice) => !query || choice.label.toLowerCase().includes(query))
+            .slice(0, 200)
+            .forEach((choice) => select.add(new Option(choice.label, choice.id)));
+        select.value = keep && [...select.options].some((o) => o.value === String(keep)) ? keep : '';
+    }
+
+    function fillSubcategories(form) {
+        const category = form.querySelector('[name="category"]').value.trim();
+        const list = document.getElementById('review-subcategories');
+        list.innerHTML = '';
+        (SUBCATEGORIES[category] || []).forEach((name) => list.appendChild(new Option(name, name)));
+    }
+
+    document.querySelectorAll('.review-row').forEach((form) => {
+        const action = form.querySelector('[name="action"]');
+        const sync = () => {
+            form.querySelectorAll('.review-group').forEach((group) => setGroupEnabled(group, group.dataset.for === action.value));
+            syncHours(form);
+            if (action.value === 'payback') fillPaybackChoices(form);
+        };
+        action.addEventListener('change', sync);
+        form.querySelector('[name="income_type"]')?.addEventListener('change', () => syncHours(form));
+        form.querySelector('.payback-filter')?.addEventListener('input', () => fillPaybackChoices(form));
+        form.querySelector('[name="sub_category"]')?.addEventListener('focus', () => fillSubcategories(form));
+        sync();
+    });
+</script>
+{% endblock %}

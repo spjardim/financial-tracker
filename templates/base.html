@@ -924,6 +924,139 @@
             min-width: 0;
             width: auto;
         }
+
+        .nav-badge {
+            display: inline-block;
+            min-width: 18px;
+            padding: 1px 6px;
+            margin-left: 4px;
+            border-radius: 9px;
+            background: var(--accent);
+            color: #06121a;
+            font-size: 11px;
+            font-weight: 700;
+            text-align: center;
+        }
+
+        .net-worth-actions form {
+            display: contents;
+        }
+        .bank-sync-status {
+            list-style: none;
+            margin: -8px 0 16px;
+            padding: 0;
+            font-size: 12px;
+            color: var(--text-muted);
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .bank-sync-status strong {
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+        .bank-sync-status .bank-sync-error {
+            color: var(--text-negative);
+        }
+        .bank-sync-status code {
+            color: var(--text-secondary);
+        }
+
+        /* Review inbox */
+        .review-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .review-header-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .review-header-actions form {
+            display: contents;
+        }
+        .review-row {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 14px 0;
+            border-bottom: 1px solid var(--border-hairline);
+        }
+        .review-line {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+        }
+        .review-fields {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+        .review-group {
+            display: contents;
+        }
+        .review-group[hidden],
+        .review-hours[hidden] {
+            display: none;
+        }
+        .review-hours {
+            display: contents;
+        }
+        .review-fields input,
+        .review-fields select {
+            padding: 6px 8px;
+            background: var(--surface-card-alt);
+            border: 1px solid var(--border-hairline);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 13px;
+            width: 150px;
+            min-width: 0;
+        }
+        .review-fields input:focus,
+        .review-fields select:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-soft);
+        }
+        .review-fields select[name="action"] {
+            width: 140px;
+        }
+        .review-fields input[name="category"] {
+            width: 190px;
+        }
+        .review-fields input[type="number"] {
+            width: 90px;
+        }
+        .review-fields select[name="expense_id"] {
+            width: 340px;
+            max-width: 100%;
+        }
+        .review-fields button {
+            padding: 6px 14px;
+            font-size: 13px;
+        }
+        .review-fields button[type="submit"] {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #06121a;
+            font-weight: 600;
+        }
+        .review-hint {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .review-hint.unsure {
+            color: #c98500;
+        }
+        .review-recent .entry-row {
+            padding: 8px 0;
+        }
     </style>
     {% block head %}{% endblock %}
 </head>
@@ -931,6 +1064,12 @@
 <nav class="top-nav">
     <div class="top-nav-inner">
         <a class="brand" href="{{ url_for('index') }}">Finances</a>
+        <div class="view-toggle">
+            <a class="view-toggle-btn {{ 'active' if active_page == 'dashboard' else '' }}" href="{{ url_for('index') }}">Dashboard</a>
+            <a class="view-toggle-btn {{ 'active' if active_page == 'review' else '' }}" href="{{ url_for('review') }}">
+                Review{% if review_count %} <span class="nav-badge">{{ review_count }}</span>{% endif %}
+            </a>
+        </div>
     </div>
 </nav>
 <div class="container">

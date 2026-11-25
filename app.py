@@ -2,12 +2,16 @@ import os
 import calendar
 import datetime
 import math
+from dotenv import load_dotenv
 from flask import Flask, render_template, request, url_for, redirect, flash, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import func, text
 
 
 basedir = os.path.abspath(os.path.dirname(__file__))
+# Local dev only: .env is excluded from the Docker image, so in production the
+# variables come from the container's environment instead.
+load_dotenv(os.path.join(basedir, '.env'))
 
 db_path = os.environ.get('DATABASE_PATH', os.path.join(basedir, 'database.db'))
 os.makedirs(os.path.dirname(db_path), exist_ok=True)
@@ -31,8 +35,9 @@ def money(value, decimals=2):
 # job can pay both tips (real hours worked) and a periodic shift-pay differential
 # or salary (no new hours). Only 'tips' entries carry scheduled/extra hours, so
 # hourly-rate analysis can include only the entries that actually represent hours worked.
-INCOME_ENTRY_TYPES = ['tips', 'shift_pay', 'salary']
-INCOME_ENTRY_TYPE_LABELS = {'tips': 'Tips', 'shift_pay': 'Shift Pay', 'salary': 'Salary'}
+# 'other' covers money that isn't pay at all - interest, cashback and the like.
+INCOME_ENTRY_TYPES = ['tips', 'shift_pay', 'salary', 'other']
+INCOME_ENTRY_TYPE_LABELS = {'tips': 'Tips', 'shift_pay': 'Shift Pay', 'salary': 'Salary', 'other': 'Other'}
 INCOME_SHIFTS = ['day', 'night']
 
 
@@ -44,6 +49,13 @@ class Expense(expense_tracker.Model):
     place = expense_tracker.Column(expense_tracker.String(100))
     description = expense_tracker.Column(expense_tracker.String(200))
     date = expense_tracker.Column(expense_tracker.DateTime, default=datetime.datetime.utcnow)
+    # Total of the Reimbursements linked to this expense. Reports use net_amount, so a friend's
+    # January Venmo for a December dinner lowers December rather than showing up in January.
+    reimbursed = expense_tracker.Column(expense_tracker.Float, nullable=False, default=0.0)
+
+    @property
+    def net_amount(self):
+        return self.amount - (self.reimbursed or 0.0)
 
     def __repr__(self):
         return f'<Expense {self.id} - {self.amount} - {self.category}>'
@@ -131,6 +143,91 @@ class AccountBalance(expense_tracker.Model):
         return f'<AccountBalance {self.account_id} - {self.date} - {self.balance}>'
 
 
+class Reimbursement(expense_tracker.Model):
+    """Money paid back toward an expense (a friend's share, a refund). Kept separately so the
+    expense still shows what was charged while counting only what was actually spent."""
+    id = expense_tracker.Column(expense_tracker.Integer, primary_key=True)
+    expense_id = expense_tracker.Column(expense_tracker.Integer, expense_tracker.ForeignKey('expense.id'), nullable=False)
+    amount = expense_tracker.Column(expense_tracker.Float, nullable=False)
+    date = expense_tracker.Column(expense_tracker.DateTime, nullable=False)
+    description = expense_tracker.Column(expense_tracker.String(200))
+
+
+class PlaidItem(expense_tracker.Model):
+    """One bank login linked through Plaid. Its access token lives in the environment
+    (PLAID_ACCESS_TOKEN_<label>), never in the database."""
+    id = expense_tracker.Column(expense_tracker.Integer, primary_key=True)
+    item_id = expense_tracker.Column(expense_tracker.String(100), unique=True, nullable=False)
+    label = expense_tracker.Column(expense_tracker.String(100), nullable=False)
+    institution_name = expense_tracker.Column(expense_tracker.String(100))
+    transactions_cursor = expense_tracker.Column(expense_tracker.Text)
+    transactions_status = expense_tracker.Column(expense_tracker.String(40))
+    # Transactions dated before this aren't pulled in, so ones already entered by hand before
+    # the bank was linked don't show up again. `flask plaid-backfill` moves it earlier.
+    import_from = expense_tracker.Column(expense_tracker.DateTime, nullable=False)
+    last_synced_at = expense_tracker.Column(expense_tracker.DateTime)
+    last_error = expense_tracker.Column(expense_tracker.String(300))
+
+
+class PlaidAccount(expense_tracker.Model):
+    id = expense_tracker.Column(expense_tracker.Integer, primary_key=True)
+    plaid_account_id = expense_tracker.Column(expense_tracker.String(100), unique=True, nullable=False)
+    item_id = expense_tracker.Column(expense_tracker.String(100), nullable=False)
+    persistent_account_id = expense_tracker.Column(expense_tracker.String(100))
+    mask = expense_tracker.Column(expense_tracker.String(10))
+    plaid_type = expense_tracker.Column(expense_tracker.String(20))
+    plaid_subtype = expense_tracker.Column(expense_tracker.String(40))
+    # NULL once the user deletes the local account - remembered so the next sync
+    # doesn't recreate an account they chose to stop tracking.
+    account_id = expense_tracker.Column(expense_tracker.Integer, expense_tracker.ForeignKey('account.id'))
+    # Older than its item's last_synced_at means the bank stopped sharing (or closed) the account.
+    last_seen_at = expense_tracker.Column(expense_tracker.DateTime)
+
+
+class PlaidCategoryMap(expense_tracker.Model):
+    """Which expense category the user files each Plaid category under - the fallback suggestion
+    for merchants they haven't filed before. Renames and merges in the app keep it current."""
+    id = expense_tracker.Column(expense_tracker.Integer, primary_key=True)
+    pfc_detailed = expense_tracker.Column(expense_tracker.String(100), unique=True, nullable=False)
+    category = expense_tracker.Column(expense_tracker.String(50), nullable=False)
+    sub_category = expense_tracker.Column(expense_tracker.String(50), nullable=False)
+
+
+class BankTransaction(expense_tracker.Model):
+    """A posted transaction pulled from a linked bank. It waits in the review inbox (status 'new')
+    until the user files it as an expense, income or a reimbursement, or ignores it."""
+    id = expense_tracker.Column(expense_tracker.Integer, primary_key=True)
+    plaid_transaction_id = expense_tracker.Column(expense_tracker.String(100), unique=True, nullable=False)
+    item_id = expense_tracker.Column(expense_tracker.String(100), nullable=False)
+    plaid_account_id = expense_tracker.Column(expense_tracker.String(100), nullable=False)
+    date = expense_tracker.Column(expense_tracker.DateTime, nullable=False)
+    # Plaid's sign convention: positive is money leaving the account, negative is money coming in.
+    amount = expense_tracker.Column(expense_tracker.Float, nullable=False)
+    merchant_name = expense_tracker.Column(expense_tracker.String(100))
+    description = expense_tracker.Column(expense_tracker.String(200))
+    pfc_primary = expense_tracker.Column(expense_tracker.String(60))
+    pfc_detailed = expense_tracker.Column(expense_tracker.String(100))
+    pfc_confidence = expense_tracker.Column(expense_tracker.String(20))
+    status = expense_tracker.Column(expense_tracker.String(20), nullable=False, default='new')
+    expense_id = expense_tracker.Column(expense_tracker.Integer, expense_tracker.ForeignKey('expense.id'))
+    income_id = expense_tracker.Column(expense_tracker.Integer, expense_tracker.ForeignKey('income.id'))
+    reimbursement_id = expense_tracker.Column(expense_tracker.Integer, expense_tracker.ForeignKey('reimbursement.id'))
+    created_at = expense_tracker.Column(expense_tracker.DateTime, nullable=False, default=datetime.datetime.utcnow)
+    reviewed_at = expense_tracker.Column(expense_tracker.DateTime)
+
+
+class ReviewRule(expense_tracker.Model):
+    """The user's last decision for a merchant (and money direction), suggested for its next transaction."""
+    id = expense_tracker.Column(expense_tracker.Integer, primary_key=True)
+    key = expense_tracker.Column(expense_tracker.String(160), unique=True, nullable=False)
+    action = expense_tracker.Column(expense_tracker.String(20), nullable=False)
+    category = expense_tracker.Column(expense_tracker.String(50))
+    sub_category = expense_tracker.Column(expense_tracker.String(50))
+    place = expense_tracker.Column(expense_tracker.String(100))
+    income_source = expense_tracker.Column(expense_tracker.String(50))
+    income_type = expense_tracker.Column(expense_tracker.String(20))
+
+
 def _migrate_income_columns():
     """Backfill entry_type/shift onto an income table created before they existed."""
     with expense_tracker.engine.connect() as conn:
@@ -150,6 +247,22 @@ def _migrate_expense_columns():
             conn.execute(text('ALTER TABLE expense ADD COLUMN sub_category VARCHAR(50)'))
         if 'place' not in existing_columns:
             conn.execute(text('ALTER TABLE expense ADD COLUMN place VARCHAR(100)'))
+        if 'reimbursed' not in existing_columns:
+            conn.execute(text('ALTER TABLE expense ADD COLUMN reimbursed FLOAT NOT NULL DEFAULT 0'))
+        conn.commit()
+
+
+def _migrate_plaid_account_columns():
+    """Backfill last_seen_at onto a plaid_account table created before it existed, treating every
+    account as seen at its bank's last sync so only later disappearances get flagged."""
+    with expense_tracker.engine.connect() as conn:
+        existing_columns = {row[1] for row in conn.execute(text('PRAGMA table_info(plaid_account)'))}
+        if 'last_seen_at' not in existing_columns:
+            conn.execute(text('ALTER TABLE plaid_account ADD COLUMN last_seen_at DATETIME'))
+            conn.execute(text(
+                'UPDATE plaid_account SET last_seen_at = '
+                '(SELECT last_synced_at FROM plaid_item WHERE plaid_item.item_id = plaid_account.item_id)'
+            ))
         conn.commit()
 
 
@@ -171,6 +284,7 @@ with app.app_context():
     expense_tracker.create_all()
     _migrate_income_columns()
     _migrate_expense_columns()
+    _migrate_plaid_account_columns()
     _seed_lookup_tables()
 
 CHART_PLOT_HEIGHT = 212  # px, excludes the x-axis label band
@@ -229,7 +343,7 @@ def _build_yearly_chart(year):
     for income in year_incomes:
         monthly_income[income.date.month - 1] += income.amount
     for expense in year_expenses:
-        monthly_expenses[expense.date.month - 1] += expense.amount
+        monthly_expenses[expense.date.month - 1] += expense.net_amount
 
     labels = [calendar.month_abbr[month] for month in range(1, 13)]
     return _chart_from_series(labels, monthly_income, monthly_expenses)
@@ -250,7 +364,7 @@ def _build_all_years_chart():
     for income in all_incomes:
         yearly_income[year_index[income.date.year]] += income.amount
     for expense in all_expenses:
-        yearly_expenses[year_index[expense.date.year]] += expense.amount
+        yearly_expenses[year_index[expense.date.year]] += expense.net_amount
 
     labels = [str(year) for year in years]
     return _chart_from_series(labels, yearly_income, yearly_expenses)
@@ -295,25 +409,33 @@ def _nice_floor(value):
 
 
 def _build_net_worth_chart():
-    """One point per month that has any recorded balance. The 'Update Balances' form
-    always re-submits every account (pre-filled with its last value), so a month's
-    total assets/liabilities is just the sum of that month's rows - no carry-forward
-    needed for months where the user left an unchanged account's figure as-is."""
+    """One point per month that has any recorded balance. Each account carries its most
+    recent balance forward into later months: Plaid-synced accounts update on their own
+    schedule while manual ones are entered at month-end, so a month where only some
+    accounts have been recorded yet would otherwise show a false dip."""
     accounts_by_id = {a.id: a for a in Account.query.all()}
     balances = AccountBalance.query.order_by(AccountBalance.date).all()
     if not balances:
         return None
 
-    months = sorted({b.date for b in balances})
+    balances_by_month = {}
+    for b in balances:
+        balances_by_month.setdefault(b.date, []).append(b)
+    months = sorted(balances_by_month)
+    latest_by_account = {}
     assets_by_month = []
     investments_by_month = []
     liabilities_by_month = []
     net_by_month = []
     for month in months:
-        month_balances = [b for b in balances if b.date == month]
+        for b in balances_by_month[month]:
+            latest_by_account[b.account_id] = b.balance
 
         def month_total(account_type):
-            return sum(b.balance for b in month_balances if accounts_by_id[b.account_id].account_type == account_type)
+            return sum(
+                balance for account_id, balance in latest_by_account.items()
+                if accounts_by_id[account_id].account_type == account_type
+            )
 
         assets, investments, liabilities = month_total('asset'), month_total('investment'), month_total('liability')
         assets_by_month.append(assets)
@@ -371,7 +493,7 @@ def _build_net_worth_chart():
 def _category_totals(expenses):
     totals = {}
     for e in expenses:
-        totals[e.category] = totals.get(e.category, 0.0) + e.amount
+        totals[e.category] = totals.get(e.category, 0.0) + e.net_amount
     return totals
 
 
@@ -386,7 +508,7 @@ def _place_totals(expenses):
     totals = {}
     for e in expenses:
         label = e.place or 'No Place'
-        totals[label] = totals.get(label, 0.0) + e.amount
+        totals[label] = totals.get(label, 0.0) + e.net_amount
     return totals
 
 
@@ -397,7 +519,7 @@ def _subcategory_breakdowns(expenses):
     for e in expenses:
         subs = totals_by_category.setdefault(e.category, {})
         label = e.sub_category or 'Misc'
-        subs[label] = subs.get(label, 0.0) + e.amount
+        subs[label] = subs.get(label, 0.0) + e.net_amount
 
     breakdowns = {}
     for category, subs in totals_by_category.items():
@@ -468,7 +590,9 @@ def index():
         prev_income_total = expense_tracker.session.query(func.coalesce(func.sum(Income.amount), 0.0)).filter(
             Income.date >= prev_year_start, Income.date < period_start
         ).scalar()
-        prev_expense_total = expense_tracker.session.query(func.coalesce(func.sum(Expense.amount), 0.0)).filter(
+        prev_expense_total = expense_tracker.session.query(
+            func.coalesce(func.sum(Expense.amount - Expense.reimbursed), 0.0)
+        ).filter(
             Expense.date >= prev_year_start, Expense.date < period_start
         ).scalar()
         income_delta_pct = _pct_change(total_income, prev_income_total)
@@ -489,6 +613,9 @@ def index():
     for b in AccountBalance.query.order_by(AccountBalance.date).all():
         latest_balance_by_account[b.account_id] = b.balance
         balance_count_by_account[b.account_id] = balance_count_by_account.get(b.account_id, 0) + 1
+    plaid_linked_account_ids = {
+        pa.account_id for pa in PlaidAccount.query.filter(PlaidAccount.account_id.isnot(None)).all()
+    }
     accounts_detailed = [
         {
             'id': a.id,
@@ -496,6 +623,7 @@ def index():
             'account_type': a.account_type,
             'latest_balance': latest_balance_by_account.get(a.id),
             'balance_count': balance_count_by_account.get(a.id, 0),
+            'plaid_linked': a.id in plaid_linked_account_ids,
         }
         for a in Account.query.order_by(Account.name).all()
     ]
@@ -574,6 +702,7 @@ def index():
         net_worth=net_worth,
         net_worth_delta_pct=net_worth_delta_pct,
         accounts_detailed=accounts_detailed,
+        plaid_status=plaid_sync.dashboard_status(),
         balance_history=_balance_history(),
         account_type_labels=ACCOUNT_TYPE_LABELS,
         current_month_value=now.strftime('%Y-%m'),
@@ -639,6 +768,10 @@ def add_expense():
 
     if expense_id:
         expense = Expense.query.get_or_404(expense_id)
+        if amount < expense.reimbursed:
+            flash(f'${expense.reimbursed:,.2f} has already been paid back toward this expense, '
+                  'so its amount can\'t be lower than that.')
+            return redirect(url_for('index'))
         expense.amount = amount
         expense.category = category
         expense.sub_category = sub_category
@@ -715,6 +848,8 @@ def add_income():
 @app.route('/delete_income/<int:income_id>', methods=['POST'])
 def delete_income(income_id):
     income = Income.query.get_or_404(income_id)
+    # Its bank line stays reviewed (as ignored, restorable from the review page) rather than reappearing.
+    BankTransaction.query.filter_by(income_id=income.id).update({'income_id': None, 'status': 'ignored'})
     expense_tracker.session.delete(income)
     expense_tracker.session.commit()
     return redirect(url_for('index'))
@@ -723,6 +858,12 @@ def delete_income(income_id):
 @app.route('/delete_expense/<int:expense_id>', methods=['POST'])
 def delete_expense(expense_id):
     expense = Expense.query.get_or_404(expense_id)
+    for reimbursement in Reimbursement.query.filter_by(expense_id=expense.id).all():
+        # The money still came in, so its bank line goes back to the inbox to be filed again.
+        BankTransaction.query.filter_by(reimbursement_id=reimbursement.id).update(
+            {'reimbursement_id': None, 'status': 'new', 'reviewed_at': None})
+        expense_tracker.session.delete(reimbursement)
+    BankTransaction.query.filter_by(expense_id=expense.id).update({'expense_id': None, 'status': 'ignored'})
     expense_tracker.session.delete(expense)
     expense_tracker.session.commit()
     return redirect(url_for('index'))
@@ -818,6 +959,7 @@ def rename_income_source(source_id):
         source.name = new_name
         Income.query.filter_by(source=old_name).update({'source': new_name})
         flash(f'Renamed "{old_name}" to "{new_name}".')
+    ReviewRule.query.filter_by(income_source=old_name).update({'income_source': new_name})
 
     expense_tracker.session.commit()
     return redirect(url_for('index'))
@@ -853,12 +995,20 @@ def rename_expense_category(category_id):
     existing = ExpenseCategory.query.filter_by(name=new_name).first()
     if existing and existing.id != category.id:
         Expense.query.filter_by(category=old_name).update({'category': new_name})
+        target_subcategory_names = {s.name for s in ExpenseSubCategory.query.filter_by(category_id=existing.id)}
+        for subcategory in ExpenseSubCategory.query.filter_by(category_id=category.id).all():
+            if subcategory.name in target_subcategory_names:
+                expense_tracker.session.delete(subcategory)
+            else:
+                subcategory.category_id = existing.id
         expense_tracker.session.delete(category)
         flash(f'Merged "{old_name}" into existing category "{new_name}".')
     else:
         category.name = new_name
         Expense.query.filter_by(category=old_name).update({'category': new_name})
         flash(f'Renamed "{old_name}" to "{new_name}".')
+    PlaidCategoryMap.query.filter_by(category=old_name).update({'category': new_name})
+    ReviewRule.query.filter_by(category=old_name).update({'category': new_name})
 
     expense_tracker.session.commit()
     return redirect(url_for('index'))
@@ -902,6 +1052,8 @@ def rename_expense_subcategory(subcategory_id):
         subcategory.name = new_name
         Expense.query.filter_by(category=category.name, sub_category=old_name).update({'sub_category': new_name})
         flash(f'Renamed "{old_name}" to "{new_name}".')
+    PlaidCategoryMap.query.filter_by(category=category.name, sub_category=old_name).update({'sub_category': new_name})
+    ReviewRule.query.filter_by(category=category.name, sub_category=old_name).update({'sub_category': new_name})
 
     expense_tracker.session.commit()
     return redirect(url_for('index'))
@@ -944,6 +1096,7 @@ def rename_expense_place(place_id):
         place.name = new_name
         Expense.query.filter_by(place=old_name).update({'place': new_name})
         flash(f'Renamed "{old_name}" to "{new_name}".')
+    ReviewRule.query.filter_by(place=old_name).update({'place': new_name})
 
     expense_tracker.session.commit()
     return redirect(url_for('index'))
@@ -989,8 +1142,25 @@ def rename_account(account_id):
         return redirect(url_for('index'))
     if new_name == account.name:
         return redirect(url_for('index'))
-    if Account.query.filter_by(name=new_name).first():
-        flash(f'"{new_name}" already exists.')
+
+    existing = Account.query.filter_by(name=new_name).first()
+    if existing:
+        # Merge - e.g. folding an account Plaid auto-created into a manual one that has the
+        # history. On months both have a balance, the account being merged into wins.
+        if (PlaidAccount.query.filter_by(account_id=account.id).first()
+                and PlaidAccount.query.filter_by(account_id=existing.id).first()):
+            flash(f'"{account.name}" and "{new_name}" are both synced from Plaid, so they can\'t be merged.')
+            return redirect(url_for('index'))
+        target_months = {b.date for b in AccountBalance.query.filter_by(account_id=existing.id)}
+        for b in AccountBalance.query.filter_by(account_id=account.id).all():
+            if b.date in target_months:
+                expense_tracker.session.delete(b)
+            else:
+                b.account_id = existing.id
+        PlaidAccount.query.filter_by(account_id=account.id).update({'account_id': existing.id})
+        expense_tracker.session.delete(account)
+        expense_tracker.session.commit()
+        flash(f'Merged "{account.name}" into "{new_name}".')
         return redirect(url_for('index'))
 
     account.name = new_name
@@ -1003,6 +1173,7 @@ def rename_account(account_id):
 def delete_account(account_id):
     account = Account.query.get_or_404(account_id)
     removed = AccountBalance.query.filter_by(account_id=account.id).delete()
+    PlaidAccount.query.filter_by(account_id=account.id).update({'account_id': None})
     expense_tracker.session.delete(account)
     expense_tracker.session.commit()
     flash(f'Deleted account "{account.name}"' + (f' and its {removed} recorded balance(s).' if removed else '.'))
@@ -1132,3 +1303,8 @@ def breakdown():
     if year:
         args['year'] = year
     return redirect(url_for('index', **args))
+
+
+# Imported last: they register routes on `app` and import the models defined above.
+import plaid_sync  # noqa: E402
+import review  # noqa: E402
